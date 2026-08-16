@@ -28,24 +28,29 @@ Widget {
             maximumLineCount: 1
         }
     }
-    Binding {
-        target: smtcConnections
-        property: "target"
-        value: backend
+
+    function updateArtist() {
+        if (backend) artistText.text = backend.artist
     }
-    Connections {
-        id: smtcConnections
-        function onArtistChanged() {
+    function updateTitle() {
+        if (backend) titleText.text = backend.title
+    }
+
+    Component.onCompleted: {
+        if (backend) {
             artistText.text = backend.artist
-        }
-        function onTitleChanged() {
             titleText.text = backend.title
+            backend.artistChanged.connect(updateArtist)
+            backend.titleChanged.connect(updateTitle)
         }
     }
+
     onBackendChanged: {
         if (backend) {
             artistText.text = backend.artist
             titleText.text = backend.title
+            backend.artistChanged.connect(updateArtist)
+            backend.titleChanged.connect(updateTitle)
         }
     }
 }
