@@ -1,0 +1,12 @@
+{
+  "id": "com.classwidgets.plugin-template",
+  "name": "插件开发模板",
+  "version": "0.4.2",
+  "api_version": "~=0.4.2",
+  "entry": "main.py",
+  "author": "RinLit",
+  "description": "支持 Class Widgets 2 插件的开发模板",
+  "url": "https://github.com/Class-Widgets/plugin-template-v2/",
+  "readme": "README.md",
+  "icon": "icon.png"
+}
