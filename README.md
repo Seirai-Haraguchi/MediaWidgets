@@ -1,3 +1,5 @@
+# 此插件仅供 Windows 平台使用！！！！！
+
 # Media Widgets
 
 Media Widgets 是为 [Class Widgets 2](https://github.com/RinLit-233-shiroko/Class-Widgets-2) 设计的插件，用于以小组件形式在屏幕上显示 Windows SMTC 媒体信息。
