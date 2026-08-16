@@ -1,12 +1,13 @@
 {
-  "id": "com.classwidgets.plugin-template",
-  "name": "插件开发模板",
-  "version": "0.4.2",
-  "api_version": "~=0.4.2",
+  "id": "com.seiraiharaguchi.mediawidgets",
+  "name": "Media Widgets",
+  "version": "1.0.0",
+  "api_version": ">=0.6.0",
   "entry": "main.py",
-  "author": "RinLit",
-  "description": "支持 Class Widgets 2 插件的开发模板",
-  "url": "https://github.com/Class-Widgets/plugin-template-v2/",
+  "author": "Seirai Haraguchi",
+  "description": "一个用于显示 Windows SMTC 媒体信息的 Class Widgets 插件。",
+  "url": "https://github.com/Seirai-Haraguchi/MediaWidgets",
   "readme": "README.md",
-  "icon": "icon.png"
+  "icon": "icon.png",
+  "tag_ids": []
 }

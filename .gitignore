@@ -1,11 +1,36 @@
+# Byte-compiled / optimized / cache
 __pycache__/
-*.pyc
-.env
+*.py[cod]
+*$py.class
+
+# Virtual environments
 .venv/
+.venv312/
+venv/
+env/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Class Widgets plugin build artifacts
+*.cwplugin
+
+# Dependencies / local libs
+libs/
+
+# Environment
+.env
+
+# IDE
 .idea/
 .vscode/
-lib/
-dist/
-build/
-*.egg-info/
-*.cwplugin
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local agent workspace data
+.workbuddy/

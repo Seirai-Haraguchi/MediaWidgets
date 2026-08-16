@@ -1,13 +1,24 @@
 [project]
-name = "com-rinlit-test"
+name = "com-seiraiharaguchi-mediawidgets"
 version = "1.0.0"
-description = "A Class Widgets plugin."
+description = "一个用于显示 Windows SMTC 媒体信息的 Class Widgets 插件。"
 authors = [
-    {name = "RinLit"},
+    {name = "Seirai Haraguchi"},
 ]
 readme = "README.md"
 requires-python = ">=3.9"
-dependencies = ["class-widgets-sdk>=0.4.2"]
+dependencies = [
+    "class-widgets-sdk",
+    "winrt-runtime~=3.2.1.0",
+    "winrt-Windows.Foundation~=3.2.1.0",
+    "winrt-Windows.Foundation.Collections~=3.2.1.0",
+    "winrt-Windows.Storage.Streams~=3.2.1.0",
+    "winrt-Windows.Media~=3.2.1.0",
+    "winrt-Windows.Media.Control~=3.2.1.0",
+]
+
+[tool.setuptools]
+packages = []
 
 [build-system]
 requires = ["setuptools"]
