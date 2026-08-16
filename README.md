@@ -4,8 +4,9 @@ Media Widgets 是为 [Class Widgets 2](https://github.com/RinLit-233-shiroko/Cla
 
 ## 截图
 
-![插件截图](docs/1.png)
+![插件截图](local-file:///G:/Dev/MediaWidgets/docs/1.png)
 
 ## 许可
 
 本项目基于 MIT 协议开源。
+
