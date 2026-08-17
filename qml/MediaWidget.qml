@@ -12,25 +12,15 @@ Widget {
         const a = backend.artist
         return a ? a : qsTr("Playing")
     }
-    property real maxTextWidth: 480
 
-    // 标题测量器（fillWidth 模式下驱动 implicitWidth 实现收缩）
-    Text {
-        id: titleMeasurer
-        visible: false
-        text: backend ? backend.title : ""
-        font: titleItem.font
-    }
+    property real coverSize: miniMode ? 24 : 36
 
-    // 宽度 = 封面 + 标题自然宽度（封顶） + 边距；歌名变短时收回，但保留最小宽度
-    implicitWidth: Math.max(
-        (miniMode ? 24 : 36) + 8 + 120 + 32,   // 最小宽度，保证短歌名也可见
-        (miniMode ? 24 : 36) + 8
-        + Math.min(titleMeasurer.implicitWidth, root.maxTextWidth)
-        + 32
-    )
+    // RowLayout 使用锚点铺满父项时不会自动把自身尺寸传给 Widget。
+    // 暴露内容行的自然宽度，避免框架把组件初始收窄到只剩封面；
+    // 最终宽度仍由 Class Widgets 的布局策略决定。
+    implicitWidth: Math.max(mainRow.implicitWidth + 32, 180)
 
-    // 主内容：封面 + 标题，左对齐、撑满组件宽度（fillWidth 保证不会溢出）
+    // 主内容：封面 + 标题，宽度完全交给 Class Widgets 框架处理（框架自带收窄）
     RowLayout {
         id: mainRow
         anchors.left: parent.left
@@ -40,8 +30,12 @@ Widget {
         anchors.rightMargin: 16
         spacing: 8
         Item {
-            Layout.preferredWidth: miniMode ? 24 : 36
-            Layout.preferredHeight: miniMode ? 24 : 36
+            Layout.minimumWidth: root.coverSize
+            Layout.preferredWidth: root.coverSize
+            Layout.maximumWidth: root.coverSize
+            Layout.minimumHeight: root.coverSize
+            Layout.preferredHeight: root.coverSize
+            Layout.maximumHeight: root.coverSize
             Image {
                 anchors.fill: parent
                 source: backend && backend.art !== "" ? backend.art : ""
@@ -51,24 +45,17 @@ Widget {
             }
             Rectangle {
                 anchors.fill: parent
-                radius: miniMode ? 6 : 8
+                radius: root.coverSize / 4.5
                 color: "#1E9AA0A6"
                 visible: backend ? backend.art === "" : true
-                Text {
-                    anchors.centerIn: parent
-                    text: qsTr("♪")
-                    opacity: 0.6
-                    font.pixelSize: miniMode ? 12 : 16
-                }
             }
         }
-        Title {
+        MarqueeTitle {
             id: titleItem
             Layout.fillWidth: true
-            Layout.maximumWidth: root.maxTextWidth
+            maximumWidth: 260
             text: backend ? backend.title : ""
-            elide: Text.ElideRight
-            maximumLineCount: 1
+            running: true
         }
     }
 }
