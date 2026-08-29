@@ -12,6 +12,7 @@ class Plugin(CW2Plugin):
         super().__init__(api)
         # 请在此导入第三方库 / Import third-party libraries here
         self._backend = None
+        self._lyrics_pusher = None
 
     def on_load(self):
         super().on_load()
@@ -43,6 +44,18 @@ class Plugin(CW2Plugin):
                 logger.info("Media Widgets: scheduled backend.start() in 1s")
             except Exception as e:
                 logger.error(f"Media Widgets: SMTC backend start failed: {e}")
+
+            # 滚动歌词：网易云搜索匹配 → 逐行推送到 CW2 动态通知
+            try:
+                provider = self.api.notification.get_provider(
+                    "com.seiraiharaguchi.mediawidgets.lyrics",
+                    name="Media Widgets Lyrics",
+                )
+                from lyrics_pusher import LyricsPusher
+                self._lyrics_pusher = LyricsPusher(provider, self._backend)
+                logger.info("Media Widgets: lyrics pusher ready")
+            except Exception as e:
+                logger.error(f"Media Widgets: lyrics pusher init failed: {e}")
         else:
             logger.warning("Media Widgets: backend is None, skipping start")
 

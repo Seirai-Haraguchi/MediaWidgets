@@ -42,6 +42,9 @@ class SmtcBackend(QObject):
     accentColorChanged = Signal()
     accentColor2Changed = Signal()
 
+    # 换歌信号（title, artist）：供歌词推送等模块按歌曲触发
+    songChanged = Signal(str, str)
+
     # 内部信号：工作线程 emit，经排队连接在主线程应用
     # 参数：title, artist, art(data URL), position_ms, duration_ms, accent1, accent2
     _mediaUpdated = Signal(str, str, str, int, int, str, str)
@@ -132,6 +135,17 @@ class SmtcBackend(QObject):
         if h > 0:
             return f"{h}:{m:02d}:{s:02d}"
         return f"{m}:{s:02d}"
+
+    # ---- 供插件内其他模块使用的普通访问器（非 Qt 属性） ----
+
+    def current_position_ms(self):
+        """当前播放位置（含播放中插值，毫秒）。"""
+        return self._current_position_ms()
+
+    @property
+    def duration_ms(self):
+        """当前曲目总时长（毫秒，未知为 0）。"""
+        return self._duration_ms
 
     # ---- 启动 ----
 
@@ -500,6 +514,7 @@ class SmtcBackend(QObject):
         self.progressChanged.emit()
 
     def _apply_update(self, title, artist, art, position_ms, duration_ms, accent1, accent2):
+        song_changed = title != self._title or artist != self._artist
         if title != self._title:
             self._title = title
             self.titleChanged.emit()
@@ -509,6 +524,8 @@ class SmtcBackend(QObject):
         if art != self._art:
             self._art = art
             self.artChanged.emit()
+        if song_changed:
+            self.songChanged.emit(title, artist)
 
         self._position_ms = max(0, position_ms)
         self._duration_ms = max(0, duration_ms)

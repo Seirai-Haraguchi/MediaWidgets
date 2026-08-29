@@ -1,11 +1,11 @@
 {
   "id": "com.seiraiharaguchi.mediawidgets",
   "name": "Media Widgets",
-  "version": "1.3.2",
+  "version": "1.4.3",
   "api_version": ">=0.6.0",
   "entry": "main.py",
   "author": "Seirai Haraguchi",
-  "description": "一个用于显示 Windows SMTC 媒体信息的 Class Widgets 插件。",
+  "description": "显示 Windows SMTC 媒体信息，并将网易云逐行歌词实时推送到动态通知。",
   "url": "https://github.com/Seirai-Haraguchi/MediaWidgets",
   "readme": "README.md",
   "icon": "icon.png",
