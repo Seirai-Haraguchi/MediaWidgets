@@ -210,20 +210,20 @@ _CREDIT_START = re.compile(
 )
 
 
-def merge_translation(lines, trans, tol_ms=200):
-    """把翻译按时间戳一对一合并进原词行：原词（翻译）。
+def align_translation(lines, trans, tol_ms=200):
+    """把翻译按时间戳一对一对齐到原词行，返回 (t, 原文, 翻译|None) 三元组。
 
     网易云 tlyric 与原词逐行同时间戳精确对齐，因此以精确匹配为主，
     仅留 tol_ms 小容差应对个别偏移；一个翻译只归属一个原词行，
-    避免密集行被同一个翻译重复贴上。制作信息行不合并。
+    避免密集行被同一个翻译重复贴上。制作信息行不匹配翻译。
     """
     if not lines or not trans:
-        return lines
+        return [(t, text, None) for t, text in lines]
     used = [False] * len(trans)
     result = []
     for t, text in lines:
         if _CREDIT_START.match(text):
-            result.append((t, text))
+            result.append((t, text, None))
             continue
         best_i, best_d = -1, tol_ms + 1
         for i, (tt, _) in enumerate(trans):
@@ -234,9 +234,9 @@ def merge_translation(lines, trans, tol_ms=200):
                 best_d, best_i = d, i
         if best_i >= 0:
             used[best_i] = True
-            result.append((t, f"{text}（{trans[best_i][1]}）"))
+            result.append((t, text, trans[best_i][1]))
         else:
-            result.append((t, text))
+            result.append((t, text, None))
     return result
 
 
@@ -269,6 +269,5 @@ def find_lyrics(title, artist, duration_ms):
 
     lrc, tlrc = fetch_lyrics(best_song["id"])
     lines = parse_lrc(lrc)
-    if tlrc:
-        lines = merge_translation(lines, parse_lrc(tlrc))
-    return best_song, lines
+    trans = parse_lrc(tlrc) if tlrc else []
+    return best_song, align_translation(lines, trans)

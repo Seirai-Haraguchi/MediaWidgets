@@ -18,6 +18,15 @@ class Plugin(CW2Plugin):
         super().on_load()
         logger.info("Media Widgets: on_load() called")
 
+        # 运行时注入：把动态通知歌词区撑宽（幂等自愈，CW2 更新后自动重打）
+        try:
+            from PySide6.QtCore import QTimer
+            from qml_patch import apply_notification_width_patch
+            apply_notification_width_patch()
+            QTimer.singleShot(2000, apply_notification_width_patch)
+        except Exception as e:
+            logger.warning(f"Media Widgets: notification width patch failed: {e}")
+
         # 创建 backend 对象（延迟导入，避免 winrt 不可用时阻止 widget 注册）
         try:
             from smtc_backend import SmtcBackend

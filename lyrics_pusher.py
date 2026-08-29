@@ -27,7 +27,7 @@ import threading
 from pathlib import Path
 
 from loguru import logger
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 
 import netease_lyrics
 
@@ -43,6 +43,7 @@ _MAX_LINE_MS = 15000    # 单行最长驻留（长间奏先隐藏，下一行到
 _TAIL_MS = 5000         # 末行驻留
 _LINE_BUFFER_MS = 900   # 下一行到来前多停留一点，避免闪断
 _CACHE_MAX = 200        # (title, artist) -> lines 缓存上限
+_DEBOUNCE_MS = 800      # SMTC 换歌时标题/艺人可能分字段先后到达，合并成一次请求
 
 
 class _DuckNotificationData:
@@ -85,9 +86,19 @@ class LyricsPusher(QObject):
         self._gen = 0                 # 换代计数：换歌后丢弃过期的网络结果
         self._lines = []              # [(time_ms, text)]
         self._last_index = -1
+        self._lines_key = None        # 当前 _lines 对应的 (title, artist)
         self._cache = {}              # 仅主线程读写
         self._icon_uri = _FALLBACK_ICON
         self._art_hash = None
+
+        # SMTC 换歌时标题/艺人常分字段先后到达，同一首歌可能触发多次
+        # songChanged；用防抖合并，避免同一首歌被重复抓取、当前行被重复推送
+        self._debounce_title = ""
+        self._debounce_artist = ""
+        self._debounce_timer = QTimer(self)
+        self._debounce_timer.setSingleShot(True)
+        self._debounce_timer.setInterval(_DEBOUNCE_MS)
+        self._debounce_timer.timeout.connect(self._do_fetch)
 
         backend.songChanged.connect(self._on_song_changed)
         backend.artChanged.connect(self._on_art_changed)
@@ -100,15 +111,23 @@ class LyricsPusher(QObject):
         self._gen += 1
         self._lines = []
         self._last_index = -1
+        self._lines_key = None
         self._refresh_icon(self._backend.art)
         if not title:
             return
 
-        key = (title, artist or "")
+        self._debounce_title = title
+        self._debounce_artist = artist or ""
+        self._debounce_timer.start()
+
+    def _do_fetch(self):
+        title = self._debounce_title
+        artist = self._debounce_artist
+        key = (title, artist)
         if key in self._cache:
             self._lines = self._cache[key]
+            self._lines_key = key
             return
-
         gen = self._gen
         duration_ms = self._backend.duration_ms
         threading.Thread(
@@ -141,8 +160,11 @@ class LyricsPusher(QObject):
         self._cache[key] = lines
         while len(self._cache) > _CACHE_MAX:
             del self._cache[next(iter(self._cache))]
+        already_shown = key == self._lines_key  # 同歌重复应用：不重置行号，避免当前行重推
         self._lines = list(lines)
-        self._last_index = -1
+        self._lines_key = key
+        if not already_shown:
+            self._last_index = -1
 
     # ---- 进度驱动：逐行推送 ----
 
@@ -167,14 +189,17 @@ class LyricsPusher(QObject):
         return lo - 1
 
     def _push_line(self, idx):
-        t, text = self._lines[idx]
+        t, text, trans = self._lines[idx]
         if idx + 1 < len(self._lines):
             stay = self._lines[idx + 1][0] - t + _LINE_BUFFER_MS
         else:
             stay = _TAIL_MS
         stay = int(max(_MIN_LINE_MS, min(_MAX_LINE_MS, stay)))
-        # 只推歌词本身，标题槽留空（灵动通知不再显示歌名）
-        self._dispatch("", text, stay)
+        # 原文进标题槽，翻译进消息槽；无翻译时原文直接进消息槽
+        if trans:
+            self._dispatch(text, trans, stay)
+        else:
+            self._dispatch("", text, stay)
 
     def _dispatch(self, title, message, duration):
         provider = self._provider
