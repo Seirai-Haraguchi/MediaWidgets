@@ -1,5 +1,6 @@
 ﻿import QtQuick
 import QtQuick.Layouts
+import Qt5Compat.GraphicalEffects
 import RinUI
 import ClassWidgets.Theme
 
@@ -13,29 +14,82 @@ Widget {
         return a ? a : qsTr("Playing")
     }
 
-    property real coverSize: miniMode ? 24 : 36
+    // 背景层（自底向上）：时间水印 → 专辑图双主色渐变 → 播放进度遮罩
+    backgroundArea: Item {
+        id: bgClip
+        anchors.fill: parent
+        layer.enabled: true
+        layer.effect: OpacityMask {
+            maskSource: Rectangle {
+                width: bgClip.width
+                height: bgClip.height
+                radius: bgClip.height * 0.22   // 与框架背景圆角一致
+                color: "black"
+            }
+        }
 
-    // RowLayout 使用锚点铺满父项时不会自动把自身尺寸传给 Widget。
-    // 暴露内容行的自然宽度，避免框架把组件初始收窄到只剩封面；
-    // 最终宽度仍由 Class Widgets 的布局策略决定。
-    implicitWidth: Math.max(mainRow.implicitWidth + 32, 180)
+        // 时间水印：最粗字重、半透明，贴右下角（圆角裁掉一点边角），放不下时截断
+        Text {
+            property int timePx: miniMode ? 22 : 40
+            Behavior on timePx { NumberAnimation { duration: 400; easing.type: Easing.OutQuint } }
+            visible: backend && backend.progress > 0
+            text: backend ? backend.positionText + "/" + backend.durationText : ""
+            color: Theme.isDark() ? Qt.alpha("#FFFFFF", 0.22) : Qt.alpha("#000000", 0.15)
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            horizontalAlignment: Text.AlignRight
+            elide: Text.ElideRight
+            font: {
+                var f = AppCentral.getQFont(Configs.data.preferences.font, Utils.fontFamily)
+                f.pixelSize = timePx
+                f.weight = 900
+                return f
+            }
+        }
 
-    // 主内容：封面 + 标题，宽度完全交给 Class Widgets 框架处理（框架自带收窄）
+        // 渐变背景：专辑图两个主色，从左到右淡出
+        Rectangle {
+            anchors.fill: parent
+            visible: backend && backend.art !== ""
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop {
+                    position: 0
+                    color: Qt.alpha(backend ? backend.accentColor : "#9AA0A6", 0.32)
+                }
+                GradientStop {
+                    position: 1
+                    color: Qt.alpha(backend ? backend.accentColor2 : "#9AA0A6", 0.10)
+                }
+            }
+        }
+
+        // 进度遮罩：随播放进度从左向右填充，颜色随明暗模式
+        Rectangle {
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: parent.width * (backend ? backend.progress : 0)
+            visible: backend && backend.progress > 0
+            color: Theme.isDark() ? Qt.alpha("#FFFFFF", 0.10) : Qt.alpha("#000000", 0.07)
+
+            Behavior on width {
+                NumberAnimation { duration: 250; easing.type: Easing.OutQuad }
+            }
+        }
+    }
+
+    // 主内容：封面 + 标题
+    // 不能锚定右侧：框架用 contentArea.childrenRect 计算 implicitWidth，
+    // 内容行一旦锚定左右，宽度就会反过来跟随组件，被 header 锁死导致标题截断
     RowLayout {
-        id: mainRow
         anchors.left: parent.left
-        anchors.right: parent.right
         anchors.verticalCenter: parent.verticalCenter
-        anchors.leftMargin: 16
-        anchors.rightMargin: 16
         spacing: 8
         Item {
-            Layout.minimumWidth: root.coverSize
-            Layout.preferredWidth: root.coverSize
-            Layout.maximumWidth: root.coverSize
-            Layout.minimumHeight: root.coverSize
-            Layout.preferredHeight: root.coverSize
-            Layout.maximumHeight: root.coverSize
+            Layout.preferredWidth: miniMode ? 24 : 36
+            Layout.preferredHeight: miniMode ? 24 : 36
             Image {
                 anchors.fill: parent
                 source: backend && backend.art !== "" ? backend.art : ""
@@ -45,17 +99,24 @@ Widget {
             }
             Rectangle {
                 anchors.fill: parent
-                radius: root.coverSize / 4.5
+                radius: miniMode ? 6 : 8
                 color: "#1E9AA0A6"
                 visible: backend ? backend.art === "" : true
+                Text {
+                    anchors.centerIn: parent
+                    text: qsTr("\u266A")
+                    opacity: 0.6
+                    font.pixelSize: miniMode ? 12 : 16
+                }
             }
         }
-        MarqueeTitle {
+        Title {
             id: titleItem
-            Layout.fillWidth: true
-            maximumWidth: 260
             text: backend ? backend.title : ""
-            running: true
+            // 标题自然撑开组件宽度，超过上限才省略
+            Layout.maximumWidth: 480
+            elide: Text.ElideRight
+            maximumLineCount: 1
         }
     }
 }
