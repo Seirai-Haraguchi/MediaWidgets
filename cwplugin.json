@@ -1,7 +1,7 @@
 {
   "id": "com.seiraiharaguchi.mediawidgets",
   "name": "Media Widgets",
-  "version": "1.4.7",
+  "version": "1.4.8",
   "api_version": ">=0.6.0",
   "entry": "main.py",
   "author": "Seirai Haraguchi",
