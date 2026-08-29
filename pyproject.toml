@@ -1,7 +1,7 @@
 [project]
 name = "com-seiraiharaguchi-mediawidgets"
 version = "1.0.0"
-description = "一个用于显示 Windows SMTC 媒体信息的 Class Widgets 插件。"
+description = "一个显示系统媒体信息并把歌词推送到动态通知的 Class Widgets 插件（Windows SMTC / Linux MPRIS）。"
 authors = [
     {name = "Seirai Haraguchi"},
 ]

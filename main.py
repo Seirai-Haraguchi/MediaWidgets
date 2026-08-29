@@ -1,7 +1,10 @@
 """
 Media Widgets
-一个用于显示 Windows SMTC 媒体信息的 Class Widgets 插件。
+一个显示系统媒体信息并把歌词推送到动态通知的 Class Widgets 插件。
+Windows 走 SMTC，Linux 走 MPRIS。
 """
+
+import sys
 
 from loguru import logger
 from ClassWidgets.SDK import CW2Plugin, PluginAPI
@@ -27,13 +30,18 @@ class Plugin(CW2Plugin):
         except Exception as e:
             logger.warning(f"Media Widgets: notification width patch failed: {e}")
 
-        # 创建 backend 对象（延迟导入，避免 winrt 不可用时阻止 widget 注册）
+        # 创建 backend 对象（延迟导入，数据源不可用时也不阻止 widget 注册）
         try:
-            from smtc_backend import SmtcBackend
-            self._backend = SmtcBackend()
-            logger.info("Media Widgets: SmtcBackend created")
+            if sys.platform == "win32":
+                from smtc_backend import SmtcBackend
+                self._backend = SmtcBackend()
+                logger.info("Media Widgets: SmtcBackend created")
+            else:
+                from mpris_backend import MprisBackend
+                self._backend = MprisBackend()
+                logger.info("Media Widgets: MprisBackend created")
         except Exception as e:
-            logger.error(f"Media Widgets: SMTC backend init failed: {e}")
+            logger.error(f"Media Widgets: backend init failed: {e}")
             self._backend = None
 
         # 注册 widget（无论 backend 是否成功都要注册）
@@ -45,14 +53,14 @@ class Plugin(CW2Plugin):
         )
         logger.info("Media Widgets: widget registered")
 
-        # 延迟启动 SMTC 轮询（确保 Qt 事件循环已启动）
+        # 延迟启动媒体后端（确保 Qt 事件循环已启动）
         if self._backend is not None:
             try:
                 from PySide6.QtCore import QTimer
                 QTimer.singleShot(1000, self._backend.start)
                 logger.info("Media Widgets: scheduled backend.start() in 1s")
             except Exception as e:
-                logger.error(f"Media Widgets: SMTC backend start failed: {e}")
+                logger.error(f"Media Widgets: backend start failed: {e}")
 
             # 滚动歌词：网易云搜索匹配 → 逐行推送到 CW2 动态通知
             try:

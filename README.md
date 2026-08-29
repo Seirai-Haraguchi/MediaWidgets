@@ -1,8 +1,15 @@
-# 此插件仅供 Windows 平台使用！！！！！
-
 # Media Widgets
 
-Media Widgets 是为 [Class Widgets 2](https://github.com/RinLit-233-shiroko/Class-Widgets-2) 设计的插件，用于以小组件形式在屏幕上显示 Windows SMTC 媒体信息。
+Media Widgets 是为 [Class Widgets 2](https://github.com/RinLit-233-shiroko/Class-Widgets-2) 设计的插件，用于以小组件形式在屏幕上显示当前播放的媒体信息，并把歌词逐行推送到「动态通知」。
+
+## 平台支持
+
+| 平台 | 数据源 | 说明 |
+| --- | --- | --- |
+| Windows | SMTC（系统媒体传输控制） | 系统原生支持，多数播放器（网易云音乐、Spotify 等）都能读取 |
+| Linux | MPRIS（通过 D-Bus） | 需要桌面环境提供 D-Bus 会话总线，并播放来自支持 MPRIS 的播放器（Spotify、Rhythmbox、VLC 等）的歌曲；切换播放器时插件会自动跟随正在播放的那个 |
+
+同一安装包同时兼容两个平台，插件启动时按系统自动选择数据源。歌词搜索、翻译分栏、动态通知撑宽注入等功能在两个平台行为一致。
 
 ## 功能
 

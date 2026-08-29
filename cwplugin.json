@@ -1,11 +1,11 @@
 {
   "id": "com.seiraiharaguchi.mediawidgets",
   "name": "Media Widgets",
-  "version": "1.4.8",
+  "version": "1.5.0",
   "api_version": ">=0.6.0",
   "entry": "main.py",
   "author": "Seirai Haraguchi",
-  "description": "显示 Windows SMTC 媒体信息，并将网易云逐行歌词实时推送到动态通知；加载时会自动把 CW2 动态通知的歌词区撑宽（幂等自愈）。",
+  "description": "显示当前播放的媒体信息（Windows SMTC / Linux MPRIS），并将网易云逐行歌词实时推送到动态通知；加载时会自动把 CW2 动态通知的歌词区撑宽（幂等自愈）。",
   "url": "https://github.com/Seirai-Haraguchi/MediaWidgets",
   "readme": "README.md",
   "icon": "icon.png",
