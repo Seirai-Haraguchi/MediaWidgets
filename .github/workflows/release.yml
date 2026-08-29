@@ -10,6 +10,10 @@ jobs:
     # 必须用 Windows：winrt 依赖带 sys_platform == 'win32' 标记，
     # Linux 上 pip 会跳过它们，打出的包在用户机器上无法初始化 SMTC 后端
     runs-on: windows-latest
+    # SDK 打包器输出含中文，en-US runner 的 cp1252 管道无法编码会直接崩溃，
+    # 强制 Python 使用 UTF-8（click 8.5 起 echo 不再有编码回退保护）
+    env:
+      PYTHONUTF8: "1"
     permissions:
       contents: write
     steps:
