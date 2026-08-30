@@ -9,6 +9,8 @@ import sys
 from loguru import logger
 from ClassWidgets.SDK import CW2Plugin, PluginAPI
 
+from plugin_config import MediaWidgetsConfig
+
 
 class Plugin(CW2Plugin):
     def __init__(self, api: PluginAPI):
@@ -16,10 +18,28 @@ class Plugin(CW2Plugin):
         # 请在此导入第三方库 / Import third-party libraries here
         self._backend = None
         self._lyrics_pusher = None
+        self._config = MediaWidgetsConfig()
 
     def on_load(self):
         super().on_load()
         logger.info("Media Widgets: on_load() called")
+
+        # 注册插件配置模型：设置页开关经 Configs 读写，运行时同步到本模型
+        try:
+            if self.pid:
+                self.api.config.register_plugin_model(self.pid, self._config)
+        except Exception as e:
+            logger.warning(f"Media Widgets: register config model failed: {e}")
+
+        # 注册同名设置页：挂在 CW2 设置 → 插件 → Media Widgets
+        try:
+            self.api.ui.register_settings_page(
+                qml_path="qml/MediaWidgetsSettings.qml",
+                title="Media Widgets",
+                icon="ic_fluent_music_note_2_20_regular",
+            )
+        except Exception as e:
+            logger.warning(f"Media Widgets: register settings page failed: {e}")
 
         # 运行时注入：把动态通知歌词区撑宽（幂等自愈，CW2 更新后自动重打）
         try:
@@ -53,6 +73,15 @@ class Plugin(CW2Plugin):
         )
         logger.info("Media Widgets: widget registered")
 
+        # 把媒体后端暴露给「设置 → 插件 → Media Widgets」页面，
+        # 使设置页能实时显示正在播放信息（此前该 key 上注册的是插件实例自身）
+        if self._backend is not None and self.pid:
+            try:
+                from src.core.plugin.bridge import PluginBackendBridge
+                PluginBackendBridge.register_backend(self.pid, self._backend)
+            except Exception as e:
+                logger.debug(f"Media Widgets: expose backend to settings page failed: {e}")
+
         # 延迟启动媒体后端（确保 Qt 事件循环已启动）
         if self._backend is not None:
             try:
@@ -69,7 +98,7 @@ class Plugin(CW2Plugin):
                     name="Media Widgets Lyrics",
                 )
                 from lyrics_pusher import LyricsPusher
-                self._lyrics_pusher = LyricsPusher(provider, self._backend)
+                self._lyrics_pusher = LyricsPusher(provider, self._backend, self._config)
                 logger.info("Media Widgets: lyrics pusher ready")
             except Exception as e:
                 logger.error(f"Media Widgets: lyrics pusher init failed: {e}")

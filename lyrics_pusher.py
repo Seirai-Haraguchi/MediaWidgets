@@ -79,10 +79,11 @@ class LyricsPusher(QObject):
     # 工作线程 → 主线程：generation, cache_key, lines
     _lyricsFetched = Signal(int, object, object)
 
-    def __init__(self, provider, backend, parent=None):
+    def __init__(self, provider, backend, config=None, parent=None):
         super().__init__(parent)
         self._provider = provider
         self._backend = backend
+        self._config = config
         self._gen = 0                 # 换代计数：换歌后丢弃过期的网络结果
         self._lines = []              # [(time_ms, text)]
         self._last_index = -1
@@ -113,7 +114,7 @@ class LyricsPusher(QObject):
         self._last_index = -1
         self._lines_key = None
         self._refresh_icon(self._backend.art)
-        if not title:
+        if not title or not self._lyrics_enabled():
             return
 
         self._debounce_title = title
@@ -121,6 +122,8 @@ class LyricsPusher(QObject):
         self._debounce_timer.start()
 
     def _do_fetch(self):
+        if not self._lyrics_enabled():
+            return
         title = self._debounce_title
         artist = self._debounce_artist
         key = (title, artist)
@@ -168,7 +171,20 @@ class LyricsPusher(QObject):
 
     # ---- 进度驱动：逐行推送 ----
 
+    def _lyrics_enabled(self):
+        """灵动通知歌词总开关（设置页可关闭，关闭后完全不推送歌词）。"""
+        cfg = self._config
+        return cfg is None or getattr(cfg, "lyrics_enabled", True)
+
+    def _show_translation(self):
+        """翻译显示开关（设置页可关闭，关闭后只推原文）。"""
+        cfg = self._config
+        return cfg is None or getattr(cfg, "show_translation", True)
+
     def _on_progress_tick(self):
+        if not self._lyrics_enabled():
+            self._last_index = -1
+            return
         if not self._lines:
             return
         idx = self._index_at(self._backend.current_position_ms())
@@ -195,8 +211,8 @@ class LyricsPusher(QObject):
         else:
             stay = _TAIL_MS
         stay = int(max(_MIN_LINE_MS, min(_MAX_LINE_MS, stay)))
-        # 原文进标题槽，翻译进消息槽；无翻译时原文直接进消息槽
-        if trans:
+        # 原文进标题槽，翻译进消息槽（翻译关闭时仅原文一行）；无翻译时原文直接进消息槽
+        if trans and self._show_translation():
             self._dispatch(text, trans, stay)
         else:
             self._dispatch("", text, stay)
