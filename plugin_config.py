@@ -3,9 +3,11 @@ plugin_config.py
 Media Widgets 插件自身的配置模型。
 
 通过 api.config.register_plugin_model() 注册后：
-- QML 设置页用 Configs.data.plugins.configs[pid].<字段> 读取、
-  Configs.setPlugin(pid, "<字段>", 值) 写入；
-- 插件 Python 侧直接读实例属性（运行时同步）。
+- 首次运行把各字段默认值写进 configs.plugins.configs[pid]，
+  QML 设置页用 Configs.data.plugins.configs[pid].<字段> 读初始状态；
+- 运行时用户在设置页切换开关，经 Configs.setPlugin 写回同一字典并持久化；
+- Python 侧（main.py 的 _live_config_getter）每次从该字典现读，
+  保证开关改动立即生效（CW2 不会把字典变更同步回模型实例）。
 """
 
 from ClassWidgets.SDK import ConfigBaseModel

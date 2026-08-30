@@ -21,6 +21,9 @@ dist/
 # Dependencies / local libs
 libs/
 
+# RinUI 主题运行时在 cwd 生成的本地配置（开发冒烟测试产物）
+RinUI/
+
 # Environment
 .env
 

@@ -24,7 +24,8 @@ class Plugin(CW2Plugin):
         super().on_load()
         logger.info("Media Widgets: on_load() called")
 
-        # 注册插件配置模型：设置页开关经 Configs 读写，运行时同步到本模型
+        # 注册插件配置模型：把默认值落进 configs.plugins.configs[pid]，
+        # QML 设置页由此读到初始状态；运行时开关经 Configs.setPlugin 写回同一字典
         try:
             if self.pid:
                 self.api.config.register_plugin_model(self.pid, self._config)
@@ -98,12 +99,39 @@ class Plugin(CW2Plugin):
                     name="Media Widgets Lyrics",
                 )
                 from lyrics_pusher import LyricsPusher
-                self._lyrics_pusher = LyricsPusher(provider, self._backend, self._config)
+                self._lyrics_pusher = LyricsPusher(
+                    provider, self._backend, self._live_config_getter()
+                )
                 logger.info("Media Widgets: lyrics pusher ready")
             except Exception as e:
                 logger.error(f"Media Widgets: lyrics pusher init failed: {e}")
         else:
             logger.warning("Media Widgets: backend is None, skipping start")
+
+    def _live_config_getter(self):
+        """返回实时读取本插件配置的函数。
+
+        QML 设置页的开关经 Configs.setPlugin 写进 configs.plugins.configs[pid]
+        （CW2 不会把字典变更同步回注册的模型实例），所以 Python 侧每次都从
+        配置管理器现读，保证开关立即生效。读取失败返回 None，由调用方回退默认值。
+        """
+        pid = self.pid
+        try:
+            configs = self.api.globalconfig.configs
+        except Exception as e:
+            logger.warning(f"Media Widgets: access config manager failed: {e}")
+            return lambda key: None
+
+        def getter(key):
+            try:
+                section = configs.plugins.configs.get(pid)
+                if not isinstance(section, dict):
+                    return None
+                return section.get(key)
+            except Exception:
+                return None
+
+        return getter
 
     def on_unload(self):
         logger.info("Media Widgets: on_unload()")

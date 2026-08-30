@@ -41,6 +41,7 @@ class MediaBackend(QObject):
     artistChanged = Signal()
     artChanged = Signal()
     progressChanged = Signal()
+    playingChanged = Signal()
     accentColorChanged = Signal()
     accentColor2Changed = Signal()
 
@@ -113,6 +114,10 @@ class MediaBackend(QObject):
     def accentColor(self):
         """从专辑图提取的主色调（hex 字符串）。"""
         return self._accent_color
+
+    @Property(bool, notify=playingChanged)
+    def isPlaying(self):
+        return self._playing
 
     @Property(str, notify=accentColor2Changed)
     def accentColor2(self):
@@ -219,9 +224,12 @@ class MediaBackend(QObject):
     def _apply_playback(self, status, rate):
         # 先按旧状态结算当前位置，避免重置时间基准导致进度回跳
         self._position_ms = self._current_position_ms()
+        was_playing = self._playing
         self._playing = (status == _STATUS_PLAYING)
         self._rate = rate if rate > 0 else 1.0
         self._pos_stamp = time.monotonic()
+        if was_playing != self._playing:
+            self.playingChanged.emit()
         self._emit_progress()
 
     # ---- 专辑图处理 ----

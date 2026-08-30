@@ -79,11 +79,14 @@ class LyricsPusher(QObject):
     # 工作线程 → 主线程：generation, cache_key, lines
     _lyricsFetched = Signal(int, object, object)
 
-    def __init__(self, provider, backend, config=None, parent=None):
+    def __init__(self, provider, backend, config_getter=None, parent=None):
         super().__init__(parent)
         self._provider = provider
         self._backend = backend
-        self._config = config
+        # 实时配置读取函数：QML 设置页经 Configs.setPlugin 写入的是
+        # configs.plugins.configs[pid] 字典（CW2 不会反向同步回注册的模型实例），
+        # 因此这里每次调用都从配置管理器现读，保证开关立即生效。
+        self._config_getter = config_getter
         self._gen = 0                 # 换代计数：换歌后丢弃过期的网络结果
         self._lines = []              # [(time_ms, text)]
         self._last_index = -1
@@ -173,13 +176,22 @@ class LyricsPusher(QObject):
 
     def _lyrics_enabled(self):
         """灵动通知歌词总开关（设置页可关闭，关闭后完全不推送歌词）。"""
-        cfg = self._config
-        return cfg is None or getattr(cfg, "lyrics_enabled", True)
+        return self._read_config("lyrics_enabled", True)
 
     def _show_translation(self):
         """翻译显示开关（设置页可关闭，关闭后只推原文）。"""
-        cfg = self._config
-        return cfg is None or getattr(cfg, "show_translation", True)
+        return self._read_config("show_translation", True)
+
+    def _read_config(self, key, default):
+        getter = self._config_getter
+        if getter is None:
+            return default
+        try:
+            value = getter(key)
+        except Exception as e:
+            logger.debug(f"Lyrics: read config {key!r} failed: {e}")
+            return default
+        return default if value is None else value
 
     def _on_progress_tick(self):
         if not self._lyrics_enabled():

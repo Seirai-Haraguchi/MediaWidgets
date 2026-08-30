@@ -27,7 +27,7 @@ Media Widgets 是为 [Class Widgets 2](https://github.com/RinLit-233-shiroko/Cla
 - **灵动通知歌词**：开关逐行歌词向「动态通知」小组件的推送
 - **显示歌词翻译**：有翻译时，译文与原文分栏显示在动态通知中；关闭后仅推原文一行
 
-设置在本地配置中持久化，与 CW2 通知页里对 "Media Widgets Lyrics" 来源的开关相互独立。
+设置改动即时生效并持久化到本地配置，与 CW2 通知页里对 "Media Widgets Lyrics" 来源的开关相互独立。
 
 ## 截图
 
