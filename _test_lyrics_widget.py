@@ -18,26 +18,24 @@ from PySide6.QtQml import QQmlComponent, QQmlEngine, QQmlExpression
 app = QGuiApplication(sys.argv)
 
 PLUGIN_DIR = Path(__file__).parent
-RINUI_QML_DIR = PLUGIN_DIR / ".venv312" / "Lib" / "site-packages"
 
 
 # ---- ClassWidgets.Theme 桩模块 ----
 
 def build_stub_module():
-    """构造可被 import ClassWidgets.Theme 解析的最小模块目录。"""
+    """构造可被 import ClassWidgets.Theme 解析的最小模块目录。
+
+    只桩组件类型（Widget/Title/MarqueeTitle），接口与 CW2 真实组件一致；
+    Theme/Utils 不在这里桩 —— 它们是 RinUI 单例，组件经 `import RinUI as Rin`
+    访问，由 build_stub_rinui 提供同名桩模块。
+    """
     mod_dir = Path(tempfile.mkdtemp(prefix="cw_theme_stub_")) / "ClassWidgets" / "Theme"
     mod_dir.mkdir(parents=True)
     (mod_dir / "qmldir").write_text(
         "module ClassWidgets.Theme\n"
-        "singleton Theme 2.0 Theme.qml\n"
-        "Widget 2.0 Widget.qml\n",
-        encoding="utf-8")
-    (mod_dir / "Theme.qml").write_text(
-        "pragma Singleton\n"
-        "import QtQuick\n"
-        "QtObject {\n"
-        "    function isDark() { return false }\n"
-        "}\n",
+        "Widget 2.0 Widget.qml\n"
+        "Title 2.0 Title.qml\n"
+        "MarqueeTitle 2.0 MarqueeTitle.qml\n",
         encoding="utf-8")
     (mod_dir / "Widget.qml").write_text(
         "import QtQuick\n"
@@ -50,11 +48,68 @@ def build_stub_module():
         "    default property alias content: contentArea.data\n"
         "    implicitWidth: 260\n"
         "    height: miniMode ? 56 : 100\n"
+        "    // 与 CW2 真实 Widget 同款卡片底：圆角矩形 + 渐变描边\n"
+        "    Rectangle {\n"
+        "        anchors.fill: parent\n"
+        "        radius: height * 0.22\n"
+        "        color: Qt.rgba(0.98, 0.98, 1.0, 0.7)\n"
+        "        border.width: 1.5\n"
+        "        border.color: Qt.rgba(1, 1, 1, 0.9)\n"
+        "    }\n"
         "    Item { id: backgroundArea; anchors.fill: parent }\n"
         "    Item { id: contentArea; anchors.fill: parent }\n"
         "}\n",
         encoding="utf-8")
+    (mod_dir / "Title.qml").write_text(
+        "import QtQuick\n"
+        "Text {}\n",
+        encoding="utf-8")
+    (mod_dir / "MarqueeTitle.qml").write_text(
+        "import QtQuick\n"
+        "Item {\n"
+        "    property alias text: label.text\n"
+        "    property alias color: label.color\n"
+        "    property int maximumWidth: 200\n"
+        "    property int speed: 50\n"
+        "    implicitWidth: Math.min(label.implicitWidth, maximumWidth)\n"
+        "    implicitHeight: label.implicitHeight\n"
+        "    clip: true\n"
+        "    Text { id: label; anchors.verticalCenter: parent.verticalCenter }\n"
+        "}\n",
+        encoding="utf-8")
     return mod_dir.parent.parent
+
+
+def build_stub_rinui():
+    """构造可被 import RinUI 解析的最小桩模块（只含组件用到的 Theme/Utils 单例）。
+
+    不能让测试引擎实例化 venv 里的真实 RinUI 单例：裸引擎（无 ThemeManager、
+    无 RinUIWindow 的应用级初始化）下实例化真实 Theme/Utils 会让之后创建的
+    QQuickText 宽度全部测为 0（真实 CW2 运行时由框架先完成初始化，无此问题，
+    见 CW2 自身组件与 MediaWidget 的线上表现）。
+    """
+    mod_dir = Path(tempfile.mkdtemp(prefix="rinui_stub_")) / "RinUI"
+    mod_dir.mkdir(parents=True)
+    (mod_dir / "qmldir").write_text(
+        "module RinUI\n"
+        "singleton Theme 2.0 Theme.qml\n"
+        "singleton Utils 2.0 Utils.qml\n",
+        encoding="utf-8")
+    (mod_dir / "Theme.qml").write_text(
+        "pragma Singleton\n"
+        "import QtQuick\n"
+        "QtObject {\n"
+        "    function isDark() { return false }\n"
+        "}\n",
+        encoding="utf-8")
+    (mod_dir / "Utils.qml").write_text(
+        "pragma Singleton\n"
+        "import QtQuick\n"
+        "QtObject {\n"
+        "    property string fontFamily: \"Microsoft YaHei\"\n"
+        "}\n",
+        encoding="utf-8")
+    return mod_dir.parent
 
 
 # ---- Python 桩：媒体后端 / 歌词后端 / 环境单例 ----
@@ -159,14 +214,6 @@ class StubAppCentral(QObject):
         return QFont(family or fallback or "Arial")
 
 
-class StubUtils(QObject):
-    fontFamilyChanged = Signal()
-
-    @Property(str, notify=fontFamilyChanged)
-    def fontFamily(self):
-        return "Arial"
-
-
 class StubConfigs(QObject):
     configChanged = Signal()
 
@@ -182,17 +229,16 @@ class StubConfigs(QObject):
 
 def main():
     engine = QQmlEngine()
-    engine.addImportPath(str(RINUI_QML_DIR))
+    # RinUI 桩必须在真实 site-packages 之前加入导入路径，保证 import RinUI 解析到桩
+    engine.addImportPath(str(build_stub_rinui()))
     engine.addImportPath(str(build_stub_module()))
 
     media = StubMedia()
     backend = StubLyricsBackend(media)
     # 桩对象必须持有引用：内联实例会被 Python GC 回收，上下文属性随之变空
     app_central = StubAppCentral()
-    utils = StubUtils()
     configs = StubConfigs()
     engine.rootContext().setContextProperty("AppCentral", app_central)
-    engine.rootContext().setContextProperty("Utils", utils)
     engine.rootContext().setContextProperty("Configs", configs)
 
     problems = []
@@ -315,6 +361,16 @@ def main():
     base_text = next(t for t in texts if t is not top_text)
     if clip_item.property("width") <= 0 or top_text.property("text") != "晴天":
         print(f"FAIL: clip width={clip_item.property('width')} top text={top_text.property('text')}")
+        print(f"DEBUG: base width={base_text.property('width')} implicit={base_text.property('implicitWidth')} "
+              f"px={base_text.property('font').pixelSize()} family={base_text.property('font').family()} "
+              f"delegate w={delegates[0].property('width')} visible={delegates[0].property('visible')}")
+        print(f"DEBUG2: base text={base_text.property('text')!r} h={base_text.property('height')}")
+        p = delegates[0].parent()
+        chain = []
+        while p is not None:
+            chain.append(f"{p.metaObject().className()}(w={p.property('width')},vis={p.property('visible')})")
+            p = p.parent()
+        print("DEBUG3:", " <- ".join(chain))
         return 1
     print(f"karaoke: clip width={clip_item.property('width'):.1f}px "
           f"of base {base_text.property('width'):.1f}px", flush=True)

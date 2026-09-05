@@ -1,38 +1,60 @@
-import QtQuick
+import ClassWidgets.Theme   // Widget / Title / MarqueeTitle；须先于 QtQuick 导入
+import QtQuick              // 后导入：同名冲突后者优先，保证 Text 解析为 QtQuick 原生 Text
 import QtQuick.Layouts
 import Qt5Compat.GraphicalEffects
-import ClassWidgets.Theme
+import RinUI as Rin         // 限定名导入：只用 Theme/Utils 单例，避免其 Text 遮蔽原生 Text
 
-// 注意：不要 import RinUI —— 它导出的 Text 会遮蔽 QtQuick 原生 Text，
-// 其默认 wrapMode: WordWrap 会让无显式宽度的歌词文本 implicitWidth 塌缩为 ~1px
+// 注意：不要非限定 import RinUI，也不要让 ClassWidgets.Theme 晚于 QtQuick 导入 ——
+// 两者导出的 Text（默认 wrapMode: WordWrap）都会遮蔽 QtQuick 原生 Text，
+// 让无显式宽度的歌词文本 implicitWidth 塌缩为 ~1px
+// Theme/Utils 是 RinUI 模块的单例（ClassWidgets.Theme 并不导出它们），
+// 因此用 Rin.Theme / Rin.Utils 访问，保证真实 CW2 运行时可解析
 
-// 逐字歌词小组件：布局语言与 MediaWidget 一致（封面 + 双主色渐变 + 进度遮罩 + 时间水印）
-// - 当前行卡拉OK填充扫描：逐字歌词（QRC/KRC）按词填充，行级歌词（LRC）整行一个"词"，同一套动画
-// - 副行：有翻译且开启翻译 → 译文；否则显示下一行歌词预览（最后一行时留空）
+// 逐字歌词小组件：完全对齐 Class Widgets 2 设计语言，与 MediaWidget 同一套约定
+// - header（text）：艺人 / Playing / Lyrics，与 MediaWidget 及所有 CW2 内置组件一致
+// - 主行（当前行 / 状态文案）：Title 标尺（正常 28 / mini 20，px 带 400ms 过渡动画），
+//   字重跟随用户偏好 Configs.data.preferences.font_weight，不再硬编码
+// - 副行（译文 / 下一句预览）：dynamicNotification 同款行内双文本模式，
+//   用框架 MarqueeTitle（超宽自动跑马灯滚动），mini 模式隐藏
+// - 宽度交给框架：当前行用 Layout.maximumWidth: 480 封顶（与 MediaWidget 的 Title 相同），
+//   超宽硬切裁切；不再自算 implicitWidth / 渐隐遮罩 / elide
+// - 卡拉OK填充扫描：逐字歌词（QRC/KRC）按词填充，行级歌词（LRC）整行一个词，同一套动画
 // - 前奏期间显示第一行（未填充的暗色预览），唱到后自然开始填充
-// - 不设 header（text 留空）：两行文字需要完整内容区高度
+// - 背景层与 MediaWidget 完全一致：时间水印 → 专辑图双主色渐变 → 播放进度遮罩
+
 Widget {
     id: root
 
     readonly property var media: backend ? backend.media : null
     readonly property bool hasMedia: media && media.title !== ""
-    readonly property int maxContentWidth: 480
-    // 卡拉OK双色：已唱满色、未唱半透明；主文字色不用专辑主色，保证任何封面下都可读
-    readonly property color sungColor: Theme.isDark() ? "#FFFFFF" : "#1B1B1B"
-    readonly property color unsungColor: Theme.isDark() ? Qt.alpha("#FFFFFF", 0.40) : Qt.alpha("#000000", 0.40)
-    readonly property color transColor: Theme.isDark() ? Qt.alpha("#FFFFFF", 0.62) : Qt.alpha("#000000", 0.60)
-    readonly property color nextColor: Theme.isDark() ? Qt.alpha("#FFFFFF", 0.38) : Qt.alpha("#000000", 0.38)
+
+    // 与 CW2 Title 同标尺：正常 28、mini 20，切换时 400ms 过渡（Title.qml 同款动画）
+    property int titlePx: miniMode ? 20 : 28
+    Behavior on titlePx { NumberAnimation { duration: 400; easing.type: Easing.OutQuint } }
+
+    // 字重跟随用户偏好（Title/Subtitle 的取值方式），不再硬编码 700
+    readonly property int titleWeight: Configs.data.preferences.font_weight || 600
 
     // CW2 Text.qml 同款字体方式：QFont 整对象赋值在 PySide6 下会丢子属性，
     // 必须拆成 family/pixelSize/weight 子属性分别绑定
-    readonly property var baseFont: AppCentral.getQFont(Configs.data.preferences.font, Utils.fontFamily)
+    readonly property var baseFont: AppCentral.getQFont(Configs.data.preferences.font, Rin.Utils.fontFamily)
 
-    text: ""
+    // 卡拉OK双色：已唱满色、未唱半透明；主文字色不用专辑主色，保证任何封面下都可读
+    readonly property color sungColor: Rin.Theme.isDark() ? "#FFFFFF" : "#1B1B1B"
+    readonly property color unsungColor: Rin.Theme.isDark() ? Qt.alpha("#FFFFFF", 0.40) : Qt.alpha("#000000", 0.40)
+
+    // header 与 MediaWidget 同语言：有媒体显艺人，无艺人显 Playing，无媒体显组件名
+    text: {
+        if (!backend || !hasMedia)
+            return qsTr("Lyrics")
+        const a = media.artist
+        return a ? a : qsTr("Playing")
+    }
 
     // 换行时轻微淡入，突出逐字扫描主体
     NumberAnimation {
         id: linePop
-        target: lyricColumn
+        target: sweepRow
         property: "opacity"
         from: 0.35
         to: 1
@@ -64,7 +86,7 @@ Widget {
             Behavior on timePx { NumberAnimation { duration: 400; easing.type: Easing.OutQuint } }
             visible: root.media && root.media.progress > 0
             text: root.media ? root.media.positionText + "/" + root.media.durationText : ""
-            color: Theme.isDark() ? Qt.alpha("#FFFFFF", 0.22) : Qt.alpha("#000000", 0.15)
+            color: Rin.Theme.isDark() ? Qt.alpha("#FFFFFF", 0.22) : Qt.alpha("#000000", 0.15)
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
@@ -97,7 +119,7 @@ Widget {
             anchors.bottom: parent.bottom
             width: parent.width * (root.media ? root.media.progress : 0)
             visible: root.media && root.media.progress > 0
-            color: Theme.isDark() ? Qt.alpha("#FFFFFF", 0.10) : Qt.alpha("#000000", 0.07)
+            color: Rin.Theme.isDark() ? Qt.alpha("#FFFFFF", 0.10) : Qt.alpha("#000000", 0.07)
 
             Behavior on width {
                 NumberAnimation { duration: 250; easing.type: Easing.OutQuad }
@@ -105,16 +127,18 @@ Widget {
         }
     }
 
-    // 主内容：封面 + 歌词两行
-    // 与 MediaWidget 相同：不能锚定右侧，内容行自然撑开组件宽度，超上限由内层裁切兜底
+    // 主内容：封面 + 当前行 | 副行（dynamicNotification 的行内双文本模式）
+    // 与 MediaWidget 相同：不能锚定右侧，内容行自然撑开组件宽度，超上限由框架裁切兜底
     RowLayout {
+        id: contentRow
         anchors.left: parent.left
         anchors.verticalCenter: parent.verticalCenter
-        spacing: 10
+        spacing: 8
 
+        // 封面（与 MediaWidget 同尺寸 / 圆角 / 间距）
         Item {
-            Layout.preferredWidth: miniMode ? 24 : 40
-            Layout.preferredHeight: miniMode ? 24 : 40
+            Layout.preferredWidth: miniMode ? 24 : 36
+            Layout.preferredHeight: miniMode ? 24 : 36
             Image {
                 anchors.fill: parent
                 source: root.hasMedia ? root.media.art : ""
@@ -124,95 +148,70 @@ Widget {
             }
             Rectangle {
                 anchors.fill: parent
-                radius: miniMode ? 6 : 9
+                radius: miniMode ? 6 : 8
                 color: "#1E9AA0A6"
                 visible: !root.hasMedia || root.media.art === ""
                 Text {
                     anchors.centerIn: parent
                     text: qsTr("\u266A")
                     opacity: 0.6
-                    font.pixelSize: miniMode ? 12 : 18
+                    font.pixelSize: miniMode ? 12 : 16
                 }
             }
         }
 
-        ColumnLayout {
-            id: lyricColumn
-            spacing: miniMode ? 0 : 3
-
-            // 当前行：状态文案 与 逐字扫描 二选一
-            Item {
-                id: lineClip
-                Layout.maximumWidth: root.maxContentWidth
-                implicitWidth: Math.min(
-                    statusText.visible ? statusText.implicitWidth : sweepRow.implicitWidth,
-                    root.maxContentWidth)
-                implicitHeight: statusText.visible ? statusText.implicitHeight : sweepRow.implicitHeight
-                clip: true
-                // 超宽时右侧渐隐而不是硬切
-                layer.enabled: sweepRow.visible && sweepRow.implicitWidth > lineClip.width
-                layer.effect: OpacityMask {
-                    maskSource: Rectangle {
-                        width: lineClip.width
-                        height: lineClip.height
-                        gradient: Gradient {
-                            orientation: Gradient.Horizontal
-                            GradientStop { position: 0; color: "#FF000000" }
-                            GradientStop {
-                                position: Math.max(0.0, 1 - 30 / Math.max(1, lineClip.width))
-                                color: "#FF000000"
-                            }
-                            GradientStop { position: 1; color: "#00000000" }
-                        }
-                    }
-                }
-
-                Text {
-                    id: statusText
-                    visible: !root.backend || root.backend.state !== "ready"
-                    text: {
-                        if (!root.backend)
-                            return ""
-                        if (!root.hasMedia)
-                            return qsTr("未在播放")
-                        switch (root.backend.state) {
-                        case "loading": return qsTr("正在获取歌词…")
-                        case "nomatch": return qsTr("未找到这首歌的歌词")
-                        case "error": return qsTr("歌词获取失败")
-                        default: return ""
-                        }
-                    }
-                    color: root.unsungColor
-                    font.family: root.baseFont.family
-                    font.pixelSize: miniMode ? 14 : 17
-                    font.weight: 500
-                }
-
-                WordSweep {
-                    id: sweepRow
-                    visible: !statusText.visible
-                    words: root.backend ? root.backend.words : []
-                    positionMs: root.backend ? root.backend.positionMs : 0
-                    baseColor: root.unsungColor
-                    fillColor: root.sungColor
-                    pixelSize: miniMode ? 15 : 20
-                    fontWeight: miniMode ? 600 : 700
+        // 当前行：状态文案 与 逐字扫描 二选一，同为 Title 标尺
+        // 状态文案用框架 Title（CW2 内置组件的占位写法，如 Nothing right now）
+        Title {
+            id: statusText
+            visible: !backend || backend.state !== "ready"
+            text: {
+                if (!backend)
+                    return ""
+                if (!root.hasMedia)
+                    return qsTr("未在播放")
+                switch (backend.state) {
+                case "loading": return qsTr("正在获取歌词…")
+                case "nomatch": return qsTr("未找到这首歌的歌词")
+                case "error": return qsTr("歌词获取失败")
+                default: return ""
                 }
             }
+            color: root.unsungColor
+        }
 
-            // 副行：译文更亮一些，下一行预览更暗
-            Text {
-                id: subText
-                Layout.maximumWidth: root.maxContentWidth
-                visible: !miniMode
-                text: root.backend ? root.backend.subLine : ""
-                color: root.backend && root.backend.subIsTranslation
-                       ? root.transColor : root.nextColor
-                elide: Text.ElideRight
-                font.family: root.baseFont.family
-                font.pixelSize: 13
-                font.weight: 400
-            }
+        WordSweep {
+            id: sweepRow
+            visible: !statusText.visible
+            // 与 MediaWidget 的 Title 同样的封顶方式，超宽硬切（框架裁切语言）
+            Layout.maximumWidth: 480
+            clip: true
+            words: backend ? backend.words : []
+            positionMs: backend ? backend.positionMs : 0
+            baseColor: root.unsungColor
+            fillColor: root.sungColor
+            pixelSize: root.titlePx
+            fontWeight: root.titleWeight
+        }
+
+        // 正文与副文本之间的 2px 分隔线（dynamicNotification 同款）
+        Rectangle {
+            visible: subLabel.visible
+            Layout.preferredWidth: 2
+            Layout.leftMargin: 4
+            Layout.rightMargin: 4
+            Layout.fillHeight: true
+            color: Rin.Theme.isDark() ? Qt.alpha("#FFFFFF", 0.28) : Qt.alpha("#000000", 0.18)
+        }
+
+        // 副行：译文更亮、下一句预览更暗；MarqueeTitle 超宽自动跑马灯
+        MarqueeTitle {
+            id: subLabel
+            visible: !miniMode && sweepRow.visible && text !== ""
+            text: backend ? backend.subLine : ""
+            maximumWidth: 200
+            speed: 100
+            opacity: backend && backend.subIsTranslation ? 0.62 : 0.38
         }
     }
 
@@ -224,7 +223,7 @@ Widget {
         property color baseColor: "#808080"
         property color fillColor: "#FFFFFF"
         property int pixelSize: 20
-        property int fontWeight: 700
+        property int fontWeight: 600
 
         implicitWidth: wordRow.implicitWidth
         implicitHeight: wordRow.implicitHeight
