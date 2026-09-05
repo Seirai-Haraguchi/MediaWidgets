@@ -25,11 +25,15 @@ jobs:
 
       - name: Syntax check all plugin modules
         run: |
-          python -m py_compile main.py media_backend.py smtc_backend.py mpris_backend.py netease_lyrics.py lyrics_pusher.py plugin_config.py
+          python -m py_compile main.py media_backend.py smtc_backend.py mpris_backend.py netease_lyrics.py lyrics_pusher.py plugin_config.py qml_widen.py
 
       - name: Run MPRIS backend logic tests
         run: |
           python _test_mpris.py
+
+      - name: Run runtime widen smoke test
+        run: |
+          python _test_qml_widen.py
 
   release:
     # 必须用 Windows：winrt 依赖带 sys_platform == 'win32' 标记，

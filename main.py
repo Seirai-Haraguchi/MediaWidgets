@@ -42,6 +42,14 @@ class Plugin(CW2Plugin):
         except Exception as e:
             logger.warning(f"Media Widgets: register settings page failed: {e}")
 
+        # 运行时撑宽动态通知歌词区：纯内存注入（QObject.setProperty），
+        # 不改任何文件；此前的磁盘补丁会被 CW2 完整性校验判定为篡改，已废弃
+        try:
+            from qml_widen import start as start_qml_widen
+            start_qml_widen()
+        except Exception as e:
+            logger.warning(f"Media Widgets: notification width injection failed: {e}")
+
         # 创建 backend 对象（延迟导入，数据源不可用时也不阻止 widget 注册）
         try:
             if sys.platform == "win32":
@@ -126,3 +134,8 @@ class Plugin(CW2Plugin):
 
     def on_unload(self):
         logger.info("Media Widgets: on_unload()")
+        try:
+            from qml_widen import stop as stop_qml_widen
+            stop_qml_widen()
+        except Exception:
+            pass
