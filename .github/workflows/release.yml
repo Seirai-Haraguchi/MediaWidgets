@@ -25,7 +25,7 @@ jobs:
 
       - name: Syntax check all plugin modules
         run: |
-          python -m py_compile main.py media_backend.py smtc_backend.py mpris_backend.py netease_lyrics.py lyrics_pusher.py qml_patch.py plugin_config.py
+          python -m py_compile main.py media_backend.py smtc_backend.py mpris_backend.py netease_lyrics.py lyrics_pusher.py plugin_config.py
 
       - name: Run MPRIS backend logic tests
         run: |
