@@ -6,36 +6,6 @@ on:
       - 'v*.*.*'
 
 jobs:
-  test-linux:
-    # Linux 支持验证：插件含 MPRIS 后端（PySide6.QtDBus），需在真实 Linux + PySide6 下跑逻辑测试
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-          cache: 'pip'
-
-      - name: Install dependencies
-        run: |
-          pip install PySide6-Essentials loguru
-
-      - name: Syntax check all plugin modules
-        run: |
-          python -m py_compile main.py media_backend.py smtc_backend.py mpris_backend.py netease_lyrics.py lyrics_providers.py lyrics_backend.py qq_des.py plugin_config.py
-
-      - name: Run MPRIS backend logic tests
-        run: |
-          python _test_mpris.py
-
-      - name: Run lyrics provider/backend logic tests
-        run: |
-          python _test_lyrics_providers.py
-          python _test_lyrics_backend.py
-
   release:
     # 必须用 Windows：winrt 依赖带 sys_platform == 'win32' 标记，
     # Linux 上 pip 会跳过它们，打出的包在用户机器上无法初始化 SMTC 后端

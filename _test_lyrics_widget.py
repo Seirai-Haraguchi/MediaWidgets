@@ -44,6 +44,7 @@ def build_stub_module():
         "    property string text: ''\n"
         "    property bool miniMode: false\n"
         "    property var backend: null\n"
+        "    property real cornerRadius: height * 0.22\n"
         "    property alias backgroundArea: backgroundArea.children\n"
         "    default property alias content: contentArea.data\n"
         "    implicitWidth: 260\n"
@@ -378,6 +379,16 @@ def main():
     # mini 模式切回正常再渲染一次（字体/尺寸分支不炸）
     root.setProperty("miniMode", True)
     root.setProperty("miniMode", False)
+
+    # 设计约定：歌词组件不显示封面图（专辑图）——内容区不应存在任何 Image 项
+    def _is_image(o):
+        return o.metaObject().className().startswith("QQuickImage")
+
+    images = [c for c in root.findChildren(QObject) if _is_image(c)]
+    if images:
+        print(f"FAIL: lyrics widget should not contain album art Image, found {len(images)}")
+        return 1
+    print("design: no album art image in content", flush=True)
 
     print("PASS: lyrics widget loaded and renders word delegates")
     return 0

@@ -1,7 +1,6 @@
 import ClassWidgets.Theme   // Widget / Title / MarqueeTitle；须先于 QtQuick 导入
 import QtQuick              // 后导入：同名冲突后者优先，保证 Text 解析为 QtQuick 原生 Text
 import QtQuick.Layouts
-import Qt5Compat.GraphicalEffects
 import RinUI as Rin         // 限定名导入：只用 Theme/Utils 单例，避免其 Text 遮蔽原生 Text
 
 // 注意：不要非限定 import RinUI，也不要让 ClassWidgets.Theme 晚于 QtQuick 导入 ——
@@ -10,8 +9,8 @@ import RinUI as Rin         // 限定名导入：只用 Theme/Utils 单例，避
 // Theme/Utils 是 RinUI 模块的单例（ClassWidgets.Theme 并不导出它们），
 // 因此用 Rin.Theme / Rin.Utils 访问，保证真实 CW2 运行时可解析
 
-// 逐字歌词小组件：完全对齐 Class Widgets 2 设计语言，与 MediaWidget 同一套约定
-// - header（text）：艺人 / Playing / Lyrics，与 MediaWidget 及所有 CW2 内置组件一致
+// 逐字歌词小组件：对齐 Class Widgets 2 设计语言，与 MediaWidget 同一套约定
+// - header（副标题）：歌名 / Lyrics，与 CW2 内置组件的副标题位置一致
 // - 主行（当前行 / 状态文案）：Title 标尺（正常 28 / mini 20，px 带 400ms 过渡动画），
 //   字重跟随用户偏好 Configs.data.preferences.font_weight，不再硬编码
 // - 副行（译文 / 下一句预览）：dynamicNotification 同款行内双文本模式，
@@ -20,7 +19,7 @@ import RinUI as Rin         // 限定名导入：只用 Theme/Utils 单例，避
 //   超宽硬切裁切；不再自算 implicitWidth / 渐隐遮罩 / elide
 // - 卡拉OK填充扫描：逐字歌词（QRC/KRC）按词填充，行级歌词（LRC）整行一个词，同一套动画
 // - 前奏期间显示第一行（未填充的暗色预览），唱到后自然开始填充
-// - 背景层与 MediaWidget 完全一致：时间水印 → 专辑图双主色渐变 → 播放进度遮罩
+// - 背景层：仅专辑图双主色渐变；不显示进度数字、进度遮罩与封面图
 
 Widget {
     id: root
@@ -43,13 +42,8 @@ Widget {
     readonly property color sungColor: Rin.Theme.isDark() ? "#FFFFFF" : "#1B1B1B"
     readonly property color unsungColor: Rin.Theme.isDark() ? Qt.alpha("#FFFFFF", 0.40) : Qt.alpha("#000000", 0.40)
 
-    // header 与 MediaWidget 同语言：有媒体显艺人，无艺人显 Playing，无媒体显组件名
-    text: {
-        if (!backend || !hasMedia)
-            return qsTr("Lyrics")
-        const a = media.artist
-        return a ? a : qsTr("Playing")
-    }
+    // header 副标题与 MediaWidget 同位置：有媒体显歌名，无媒体显组件名
+    text: backend && hasMedia ? media.title : qsTr("Lyrics")
 
     // 换行时轻微淡入，突出逐字扫描主体
     NumberAnimation {
@@ -67,98 +61,31 @@ Widget {
         function onLineChanged() { linePop.restart() }
     }
 
-    // 背景层（自底向上）：时间水印 → 专辑图双主色渐变 → 播放进度遮罩
-    backgroundArea: Item {
-        id: bgClip
+    // 背景层：专辑图双主色渐变（从左到右淡出），圆角跟随框架 cornerRadius 以契合各主题
+    backgroundArea: Rectangle {
         anchors.fill: parent
-        layer.enabled: true
-        layer.effect: OpacityMask {
-            maskSource: Rectangle {
-                width: bgClip.width
-                height: bgClip.height
-                radius: bgClip.height * 0.22
-                color: "black"
+        radius: root.cornerRadius
+        visible: root.media && root.media.art !== ""
+        gradient: Gradient {
+            orientation: Gradient.Horizontal
+            GradientStop {
+                position: 0
+                color: Qt.alpha(root.media ? root.media.accentColor : "#9AA0A6", 0.32)
             }
-        }
-
-        Text {
-            property int timePx: miniMode ? 22 : 40
-            Behavior on timePx { NumberAnimation { duration: 400; easing.type: Easing.OutQuint } }
-            visible: root.media && root.media.progress > 0
-            text: root.media ? root.media.positionText + "/" + root.media.durationText : ""
-            color: Rin.Theme.isDark() ? Qt.alpha("#FFFFFF", 0.22) : Qt.alpha("#000000", 0.15)
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            horizontalAlignment: Text.AlignRight
-            elide: Text.ElideRight
-            font.family: root.baseFont.family
-            font.pixelSize: timePx
-            font.weight: 900
-        }
-
-        Rectangle {
-            anchors.fill: parent
-            visible: root.media && root.media.art !== ""
-            gradient: Gradient {
-                orientation: Gradient.Horizontal
-                GradientStop {
-                    position: 0
-                    color: Qt.alpha(root.media ? root.media.accentColor : "#9AA0A6", 0.32)
-                }
-                GradientStop {
-                    position: 1
-                    color: Qt.alpha(root.media ? root.media.accentColor2 : "#9AA0A6", 0.10)
-                }
-            }
-        }
-
-        Rectangle {
-            anchors.left: parent.left
-            anchors.top: parent.top
-            anchors.bottom: parent.bottom
-            width: parent.width * (root.media ? root.media.progress : 0)
-            visible: root.media && root.media.progress > 0
-            color: Rin.Theme.isDark() ? Qt.alpha("#FFFFFF", 0.10) : Qt.alpha("#000000", 0.07)
-
-            Behavior on width {
-                NumberAnimation { duration: 250; easing.type: Easing.OutQuad }
+            GradientStop {
+                position: 1
+                color: Qt.alpha(root.media ? root.media.accentColor2 : "#9AA0A6", 0.10)
             }
         }
     }
 
-    // 主内容：封面 + 当前行 | 副行（dynamicNotification 的行内双文本模式）
+    // 主内容：当前行 | 副行（dynamicNotification 的行内双文本模式）
     // 与 MediaWidget 相同：不能锚定右侧，内容行自然撑开组件宽度，超上限由框架裁切兜底
     RowLayout {
         id: contentRow
         anchors.left: parent.left
         anchors.verticalCenter: parent.verticalCenter
         spacing: 8
-
-        // 封面（与 MediaWidget 同尺寸 / 圆角 / 间距）
-        Item {
-            Layout.preferredWidth: miniMode ? 24 : 36
-            Layout.preferredHeight: miniMode ? 24 : 36
-            Image {
-                anchors.fill: parent
-                source: root.hasMedia ? root.media.art : ""
-                fillMode: Image.PreserveAspectCrop
-                asynchronous: true
-                visible: source !== ""
-            }
-            Rectangle {
-                anchors.fill: parent
-                radius: miniMode ? 6 : 8
-                color: "#1E9AA0A6"
-                visible: !root.hasMedia || root.media.art === ""
-                Text {
-                    anchors.centerIn: parent
-                    text: qsTr("\u266A")
-                    opacity: 0.6
-                    font.pixelSize: miniMode ? 12 : 16
-                }
-            }
-        }
 
         // 当前行：状态文案 与 逐字扫描 二选一，同为 Title 标尺
         // 状态文案用框架 Title（CW2 内置组件的占位写法，如 Nothing right now）
