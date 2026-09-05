@@ -1,11 +1,11 @@
 {
   "id": "com.seiraiharaguchi.mediawidgets",
   "name": "Media Widgets",
-  "version": "1.6.3",
+  "version": "1.7.0",
   "api_version": ">=0.6.0",
   "entry": "main.py",
   "author": "Seirai Haraguchi",
-  "description": "显示当前播放的媒体信息（Windows SMTC / Linux MPRIS），并将网易云逐行歌词实时推送到动态通知；运行时在内存中把动态通知歌词区撑宽（不改动任何文件）。",
+  "description": "显示当前播放的媒体信息（Windows SMTC / Linux MPRIS），并带独立逐字歌词小组件：支持 QQ 音乐（QRC）/ 酷狗（KRC）逐字、网易云行级歌词，卡拉OK 填充动画，译文或下一句预览副行，歌词源可在设置中选择。",
   "url": "https://github.com/Seirai-Haraguchi/MediaWidgets",
   "readme": "README.md",
   "icon": "icon.png",

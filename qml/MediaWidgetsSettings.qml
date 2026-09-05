@@ -168,17 +168,36 @@ FluentPage {
         text: qsTr("歌词")
     }
 
-    // 灵动通知歌词开关
+    // 歌词源选择：改动立即生效（对当前歌曲重新抓取）
     SettingCard {
         Layout.fillWidth: true
         Layout.topMargin: 4
-        icon.name: "ic_fluent_alert_on_20_regular"
-        title: qsTr("灵动通知歌词")
-        description: qsTr("把逐行歌词实时推送到动态通知小组件")
+        icon.name: "ic_fluent_music_note_2_20_regular"
+        title: qsTr("歌词源")
+        description: qsTr("「自动」按 QQ → 酷狗 → 网易云顺序取第一个匹配，优先逐字歌词")
 
-        Switch {
-            checked: root.config("lyrics_enabled", true)
-            onToggled: Configs.setPlugin(root.pluginId, "lyrics_enabled", checked)
+        ComboBox {
+            id: sourceCombo
+            textRole: "label"
+            model: ListModel {
+                ListElement { label: qsTr("自动"); value: "auto" }
+                ListElement { label: qsTr("QQ音乐"); value: "qqmusic" }
+                ListElement { label: qsTr("酷狗音乐"); value: "kugou" }
+                ListElement { label: qsTr("网易云音乐"); value: "netease" }
+            }
+
+            property string currentSource: root.config("lyric_source", "auto")
+            currentIndex: {
+                var idx = 0
+                for (var i = 0; i < sourceCombo.count; i++)
+                    if (sourceCombo.model.get(i).value === currentSource)
+                        idx = i
+                return idx
+            }
+            onActivated: (index) => {
+                Configs.setPlugin(root.pluginId, "lyric_source",
+                                  sourceCombo.model.get(index).value)
+            }
         }
     }
 
@@ -187,7 +206,7 @@ FluentPage {
         Layout.fillWidth: true
         icon.name: "ic_fluent_translate_20_regular"
         title: qsTr("显示歌词翻译")
-        description: qsTr("有翻译时，译文与原文分栏显示在动态通知中")
+        description: qsTr("有翻译时在歌词组件的原文下方显示译文；无翻译或关闭时显示下一行预览")
 
         Switch {
             checked: root.config("show_translation", true)

@@ -1,7 +1,8 @@
 """
 Media Widgets
-一个显示系统媒体信息并把歌词推送到动态通知的 Class Widgets 插件。
-Windows 走 SMTC，Linux 走 MPRIS。
+一个显示系统媒体信息与逐字歌词的 Class Widgets 插件。
+Windows 走 SMTC，Linux 走 MPRIS；歌词支持 QQ音乐（QRC 逐字）、
+酷狗（KRC 逐字）、网易云（LRC 行级），在自有的歌词小组件中卡拉OK渲染。
 """
 
 import sys
@@ -17,7 +18,7 @@ class Plugin(CW2Plugin):
         super().__init__(api)
         # 请在此导入第三方库 / Import third-party libraries here
         self._backend = None
-        self._lyrics_pusher = None
+        self._lyrics_backend = None
         self._config = MediaWidgetsConfig()
 
     def on_load(self):
@@ -25,7 +26,7 @@ class Plugin(CW2Plugin):
         logger.info("Media Widgets: on_load() called")
 
         # 注册插件配置模型：把默认值落进 configs.plugins.configs[pid]，
-        # QML 设置页由此读到初始状态；运行时开关经 Configs.setPlugin 写回同一字典
+        # QML 设置页由此读到初始状态；运行时改动经 Configs.setPlugin 写回同一字典
         try:
             if self.pid:
                 self.api.config.register_plugin_model(self.pid, self._config)
@@ -41,14 +42,6 @@ class Plugin(CW2Plugin):
             )
         except Exception as e:
             logger.warning(f"Media Widgets: register settings page failed: {e}")
-
-        # 运行时撑宽动态通知歌词区：纯内存注入（QObject.setProperty），
-        # 不改任何文件；此前的磁盘补丁会被 CW2 完整性校验判定为篡改，已废弃
-        try:
-            from qml_widen import start as start_qml_widen
-            start_qml_widen()
-        except Exception as e:
-            logger.warning(f"Media Widgets: notification width injection failed: {e}")
 
         # 创建 backend 对象（延迟导入，数据源不可用时也不阻止 widget 注册）
         try:
@@ -73,46 +66,50 @@ class Plugin(CW2Plugin):
         )
         logger.info("Media Widgets: widget registered")
 
-        # 把媒体后端暴露给「设置 → 插件 → Media Widgets」页面，
-        # 使设置页能实时显示正在播放信息（此前该 key 上注册的是插件实例自身）
-        if self._backend is not None and self.pid:
-            try:
-                from src.core.plugin.bridge import PluginBackendBridge
-                PluginBackendBridge.register_backend(self.pid, self._backend)
-            except Exception as e:
-                logger.debug(f"Media Widgets: expose backend to settings page failed: {e}")
-
-        # 延迟启动媒体后端（确保 Qt 事件循环已启动）
         if self._backend is not None:
+            # 歌词组件后端：换歌抓取（磁盘缓存优先）→ 逐字数据/副行/进度节拍
+            try:
+                from lyrics_backend import LyricsBackend
+                self._lyrics_backend = LyricsBackend(
+                    self._backend, self._live_config_getter())
+                self.api.widgets.register(
+                    widget_id="com.seiraiharaguchi.mediawidgets.lyrics",
+                    name="Lyrics Widget",
+                    qml_path="qml/LyricsWidget.qml",
+                    backend_obj=self._lyrics_backend,
+                )
+                logger.info("Media Widgets: lyrics widget registered")
+            except Exception as e:
+                logger.error(f"Media Widgets: lyrics widget init failed: {e}")
+                self._lyrics_backend = None
+
+            # 把媒体后端暴露给「设置 → 插件 → Media Widgets」页面，
+            # 使设置页能实时显示正在播放信息
+            if self.pid:
+                try:
+                    from src.core.plugin.bridge import PluginBackendBridge
+                    PluginBackendBridge.register_backend(self.pid, self._backend)
+                except Exception as e:
+                    logger.debug(f"Media Widgets: expose backend to settings page failed: {e}")
+
+            # 延迟启动媒体与歌词后端（确保 Qt 事件循环已启动）
             try:
                 from PySide6.QtCore import QTimer
                 QTimer.singleShot(1000, self._backend.start)
-                logger.info("Media Widgets: scheduled backend.start() in 1s")
+                if self._lyrics_backend is not None:
+                    QTimer.singleShot(1200, self._lyrics_backend.start)
+                logger.info("Media Widgets: scheduled backend start in 1s")
             except Exception as e:
                 logger.error(f"Media Widgets: backend start failed: {e}")
-
-            # 滚动歌词：网易云搜索匹配 → 逐行推送到 CW2 动态通知
-            try:
-                provider = self.api.notification.get_provider(
-                    "com.seiraiharaguchi.mediawidgets.lyrics",
-                    name="Media Widgets Lyrics",
-                )
-                from lyrics_pusher import LyricsPusher
-                self._lyrics_pusher = LyricsPusher(
-                    provider, self._backend, self._live_config_getter()
-                )
-                logger.info("Media Widgets: lyrics pusher ready")
-            except Exception as e:
-                logger.error(f"Media Widgets: lyrics pusher init failed: {e}")
         else:
             logger.warning("Media Widgets: backend is None, skipping start")
 
     def _live_config_getter(self):
         """返回实时读取本插件配置的函数。
 
-        QML 设置页的开关经 Configs.setPlugin 写进 configs.plugins.configs[pid]
+        QML 设置页的改动经 Configs.setPlugin 写进 configs.plugins.configs[pid]
         （CW2 不会把字典变更同步回注册的模型实例），所以 Python 侧每次都从
-        配置管理器现读，保证开关立即生效。读取失败返回 None，由调用方回退默认值。
+        配置管理器现读，保证改动立即生效。读取失败返回 None，由调用方回退默认值。
         """
         pid = self.pid
         try:
@@ -133,9 +130,9 @@ class Plugin(CW2Plugin):
         return getter
 
     def on_unload(self):
-        logger.info("Media Widgets: on_unload()")
-        try:
-            from qml_widen import stop as stop_qml_widen
-            stop_qml_widen()
-        except Exception:
-            pass
+        logger.info("Media Widgets: on_unload() called")
+        if self._lyrics_backend is not None:
+            try:
+                self._lyrics_backend.stop()
+            except Exception:
+                pass
