@@ -37,3 +37,5 @@ Thumbs.db
 
 # Local agent workspace data
 .workbuddy/
+# 测试桩模块临时目录
+.tmp/

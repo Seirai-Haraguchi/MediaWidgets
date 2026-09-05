@@ -19,6 +19,9 @@ app = QGuiApplication(sys.argv)
 
 PLUGIN_DIR = Path(__file__).parent
 
+# 桩模块临时目录放项目内：系统盘满时（CI/本地）不再阻塞测试
+STUB_TMP_DIR = PLUGIN_DIR / ".tmp"
+
 
 # ---- ClassWidgets.Theme 桩模块 ----
 
@@ -29,7 +32,8 @@ def build_stub_module():
     Theme/Utils 不在这里桩 —— 它们是 RinUI 单例，组件经 `import RinUI as Rin`
     访问，由 build_stub_rinui 提供同名桩模块。
     """
-    mod_dir = Path(tempfile.mkdtemp(prefix="cw_theme_stub_")) / "ClassWidgets" / "Theme"
+    STUB_TMP_DIR.mkdir(parents=True, exist_ok=True)
+    mod_dir = Path(tempfile.mkdtemp(prefix="cw_theme_stub_", dir=STUB_TMP_DIR)) / "ClassWidgets" / "Theme"
     mod_dir.mkdir(parents=True)
     (mod_dir / "qmldir").write_text(
         "module ClassWidgets.Theme\n"
@@ -45,6 +49,7 @@ def build_stub_module():
         "    property bool miniMode: false\n"
         "    property var backend: null\n"
         "    property real cornerRadius: height * 0.22\n"
+        "    property real padding: miniMode ? 16 : 24\n"
         "    property alias backgroundArea: backgroundArea.children\n"
         "    default property alias content: contentArea.data\n"
         "    implicitWidth: 260\n"
@@ -89,7 +94,7 @@ def build_stub_rinui():
     QQuickText 宽度全部测为 0（真实 CW2 运行时由框架先完成初始化，无此问题，
     见 CW2 自身组件与 MediaWidget 的线上表现）。
     """
-    mod_dir = Path(tempfile.mkdtemp(prefix="rinui_stub_")) / "RinUI"
+    mod_dir = Path(tempfile.mkdtemp(prefix="rinui_stub_", dir=STUB_TMP_DIR)) / "RinUI"
     mod_dir.mkdir(parents=True)
     (mod_dir / "qmldir").write_text(
         "module RinUI\n"
@@ -203,6 +208,11 @@ class StubLyricsBackend(QObject):
     @Property(int, notify=positionChanged)
     def positionMs(self):
         return self._position_ms
+
+    @Slot(int)
+    def set_position(self, ms):
+        self._position_ms = ms
+        self.positionChanged.emit()
 
     @Property(str, notify=sourceNameChanged)
     def sourceName(self):
@@ -389,6 +399,60 @@ def main():
         print(f"FAIL: lyrics widget should not contain album art Image, found {len(images)}")
         return 1
     print("design: no album art image in content", flush=True)
+
+    # 跑马灯跟随：行宽超出视口时 wordRow 向左滚，唱完归 0
+    # 整行宽 ≈ 56+28+84 = 168px；副行块 ≈ 18+~60px
+    def _find_wordrow():
+        # 组合组件实例的 className 带 _QML_N 后缀，不能用精确名匹配
+        stack = [root]
+        while stack:
+            item = stack.pop()
+            cls = item.metaObject().className()
+            if cls.startswith("QQuickRow") and not cls.startswith("QQuickRowLayout"):
+                return item
+            stack.extend(item.findChildren(QObject) or [])
+        return None
+
+    word_row = _find_wordrow()
+    if word_row is None:
+        print("FAIL: word Row not found")
+        return 1
+
+    def _row_x():
+        return word_row.property("x")
+
+    # 宽组件：行放得下 → 不滚
+    root.setProperty("width", 560)
+    backend.set_position(3700)
+    loop2 = QEventLoop()
+    QTimer.singleShot(500, loop2.quit)   # 等 Behavior on x 收敛
+    loop2.exec()
+    if abs(_row_x()) > 0.5:
+        print(f"FAIL: wide widget should not scroll, wordRow.x={_row_x()}")
+        return 1
+    print("marquee: wide viewport keeps row at x=0", flush=True)
+
+    # 窄组件：行放不下 → 滚动钳制在 maxScroll（168-视口）
+    root.setProperty("width", 200)
+    loop3 = QEventLoop()
+    QTimer.singleShot(500, loop3.quit)
+    loop3.exec()
+    scroll_x = _row_x()
+    if scroll_x >= 0 or scroll_x < -160:
+        print(f"FAIL: narrow widget should scroll into range, wordRow.x={scroll_x}")
+        return 1
+    print(f"marquee: narrow viewport scrolls row to x={scroll_x:.1f}", flush=True)
+
+    # 唱完（超出行尾）→ 停在 maxScroll，不再继续滚
+    backend.set_position(5000)
+    loop4 = QEventLoop()
+    QTimer.singleShot(500, loop4.quit)
+    loop4.exec()
+    end_x = _row_x()
+    if abs(end_x - scroll_x) > 8:
+        print(f"FAIL: scroll should clamp at line end, x {scroll_x:.1f} -> {end_x:.1f}")
+        return 1
+    print("marquee: scroll clamps at line end", flush=True)
 
     print("PASS: lyrics widget loaded and renders word delegates")
     return 0

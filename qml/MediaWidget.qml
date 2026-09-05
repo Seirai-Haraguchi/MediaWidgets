@@ -15,6 +15,7 @@ Widget {
     }
 
     // 背景层（自底向上）：时间水印 → 专辑图双主色渐变 → 播放进度遮罩
+    // 圆角跟随框架 cornerRadius（widget_corner_radius 偏好），契合各主题
     backgroundArea: Item {
         id: bgClip
         anchors.fill: parent
@@ -23,7 +24,7 @@ Widget {
             maskSource: Rectangle {
                 width: bgClip.width
                 height: bgClip.height
-                radius: bgClip.height * 0.22   // 与框架背景圆角一致
+                radius: root.cornerRadius
                 color: "black"
             }
         }
