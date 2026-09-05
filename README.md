@@ -1,6 +1,7 @@
 # Media Widgets
 
 Media Widgets 是为 [Class Widgets 2](https://github.com/RinLit-233-shiroko/Class-Widgets-2) 设计的插件，用于以小组件形式在屏幕上显示当前播放的媒体信息，并附带一个独立的逐字歌词小组件。
+**安装此插件后，你必须以管理员身份运行 Class Widgets 才能使得 Class Widgets 正常启动且插件可以正常使用。**
 
 ## 平台支持
 
