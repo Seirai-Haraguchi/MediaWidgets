@@ -6,20 +6,44 @@ import ClassWidgets.Theme
 
 Widget {
     id: root
-    // header: 有媒体时显示艺人，无媒体时显示占位文字
+    // header（副行）：可在插件设置中选择艺人或播放进度；无媒体时显示占位文字
     text: {
         if (!backend || backend.title === "")
             return qsTr("Media")
+        if (secondaryContent === "progress")
+            return backend.positionText + " / " + backend.durationText
         const a = backend.artist
         return a ? a : qsTr("Playing")
     }
 
-    // 「显示播放源图标」偏好（插件设置页写入；Configs.data 变更通知驱动本绑定刷新）
-    readonly property bool sourceBadgeEnabled: {
+    // 插件设置页写入；Configs.data 变更通知驱动这些绑定即时刷新
+    readonly property var pluginConfig: {
         var plugins = Configs.data && Configs.data.plugins ? Configs.data.plugins : null
-        var section = plugins && plugins.configs
-                      ? plugins.configs["com.seiraiharaguchi.mediawidgets"] : null
-        return !!section && section.show_source_badge === true
+        return plugins && plugins.configs
+               ? plugins.configs["com.seiraiharaguchi.mediawidgets"] : null
+    }
+
+    readonly property bool sourceBadgeEnabled: {
+        return !!pluginConfig && pluginConfig.show_source_badge === true
+    }
+    readonly property bool gradientBackgroundEnabled: {
+        return !pluginConfig || pluginConfig.media_gradient_background !== false
+    }
+    readonly property real gradientIntensity: {
+        if (!pluginConfig || pluginConfig.media_gradient_intensity === undefined)
+            return 1.0
+        var value = Number(pluginConfig.media_gradient_intensity)
+        return isNaN(value) ? 1.0 : Math.max(0, Math.min(100, value)) / 100
+    }
+    readonly property bool backgroundProgressEnabled: {
+        return !pluginConfig || pluginConfig.media_background_progress !== false
+    }
+    readonly property bool backgroundProgressTextEnabled: {
+        return !pluginConfig || pluginConfig.media_background_progress_text !== false
+    }
+    readonly property string secondaryContent: {
+        return pluginConfig && pluginConfig.media_subtitle_content === "progress"
+               ? "progress" : "artist"
     }
 
     // 背景层（自底向上）：时间水印 → 专辑图双主色渐变 → 播放进度遮罩
@@ -39,9 +63,10 @@ Widget {
 
         // 时间水印：最粗字重、半透明，贴右下角（圆角裁掉一点边角），放不下时截断
         Text {
+            objectName: "backgroundProgressText"
             property int timePx: miniMode ? 22 : 40
             Behavior on timePx { NumberAnimation { duration: 400; easing.type: Easing.OutQuint } }
-            visible: backend && backend.progress > 0
+            visible: root.backgroundProgressTextEnabled && backend && backend.progress > 0
             text: backend ? backend.positionText + "/" + backend.durationText : ""
             color: Theme.isDark() ? Qt.alpha("#FFFFFF", 0.22) : Qt.alpha("#000000", 0.15)
             anchors.left: parent.left
@@ -59,28 +84,32 @@ Widget {
 
         // 渐变背景：专辑图两个主色，从左到右淡出
         Rectangle {
+            objectName: "gradientBackground"
             anchors.fill: parent
-            visible: backend && backend.art !== ""
+            visible: root.gradientBackgroundEnabled && backend && backend.art !== ""
             gradient: Gradient {
                 orientation: Gradient.Horizontal
                 GradientStop {
                     position: 0
-                    color: Qt.alpha(backend ? backend.accentColor : "#9AA0A6", 0.32)
+                    color: Qt.alpha(backend ? backend.accentColor : "#9AA0A6",
+                                    0.32 * root.gradientIntensity)
                 }
                 GradientStop {
                     position: 1
-                    color: Qt.alpha(backend ? backend.accentColor2 : "#9AA0A6", 0.10)
+                    color: Qt.alpha(backend ? backend.accentColor2 : "#9AA0A6",
+                                    0.10 * root.gradientIntensity)
                 }
             }
         }
 
         // 进度遮罩：随播放进度从左向右填充，颜色随明暗模式
         Rectangle {
+            objectName: "backgroundProgress"
             anchors.left: parent.left
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             width: parent.width * (backend ? backend.progress : 0)
-            visible: backend && backend.progress > 0
+            visible: root.backgroundProgressEnabled && backend && backend.progress > 0
             color: Theme.isDark() ? Qt.alpha("#FFFFFF", 0.10) : Qt.alpha("#000000", 0.07)
 
             Behavior on width {

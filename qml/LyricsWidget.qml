@@ -19,13 +19,29 @@ import RinUI as Rin         // 限定名导入：只用 Theme/Utils 单例，避
 //   不再硬切，而是整行向左滚动（跑马灯跟随逐字演唱位置，行内唱完自动归位）
 // - 卡拉OK填充扫描：逐字歌词（QRC/KRC）按词填充，行级歌词（LRC）整行一个词，同一套动画
 // - 前奏期间显示第一行（未填充的暗色预览），唱到后自然开始填充
-// - 背景层：仅专辑图双主色渐变；不显示进度数字、进度遮罩与封面图
+// - 背景层：仅专辑图双主色渐变；可在插件设置中调整开关与浓度
 
 Widget {
     id: root
 
     readonly property var media: backend ? backend.media : null
     readonly property bool hasMedia: media && media.title !== ""
+
+    // 歌词组件背景偏好（设置页写入后即时更新）
+    readonly property var pluginConfig: {
+        var plugins = Configs.data && Configs.data.plugins ? Configs.data.plugins : null
+        return plugins && plugins.configs
+               ? plugins.configs["com.seiraiharaguchi.mediawidgets"] : null
+    }
+    readonly property bool gradientBackgroundEnabled: {
+        return !pluginConfig || pluginConfig.lyric_gradient_background !== false
+    }
+    readonly property real gradientIntensity: {
+        if (!pluginConfig || pluginConfig.lyric_gradient_intensity === undefined)
+            return 1.0
+        var value = Number(pluginConfig.lyric_gradient_intensity)
+        return isNaN(value) ? 1.0 : Math.max(0, Math.min(100, value)) / 100
+    }
 
     // 与 CW2 Title 同标尺：正常 28、mini 20，切换时 400ms 过渡（Title.qml 同款动画）
     property int titlePx: miniMode ? 20 : 28
@@ -63,18 +79,21 @@ Widget {
 
     // 背景层：专辑图双主色渐变（从左到右淡出），圆角跟随框架 cornerRadius 以契合各主题
     backgroundArea: Rectangle {
+        objectName: "gradientBackground"
         anchors.fill: parent
         radius: root.cornerRadius
-        visible: root.media && root.media.art !== ""
+        visible: root.gradientBackgroundEnabled && root.media && root.media.art !== ""
         gradient: Gradient {
             orientation: Gradient.Horizontal
             GradientStop {
                 position: 0
-                color: Qt.alpha(root.media ? root.media.accentColor : "#9AA0A6", 0.32)
+                color: Qt.alpha(root.media ? root.media.accentColor : "#9AA0A6",
+                                0.32 * root.gradientIntensity)
             }
             GradientStop {
                 position: 1
-                color: Qt.alpha(root.media ? root.media.accentColor2 : "#9AA0A6", 0.10)
+                color: Qt.alpha(root.media ? root.media.accentColor2 : "#9AA0A6",
+                                0.10 * root.gradientIntensity)
             }
         }
     }

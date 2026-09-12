@@ -16,8 +16,19 @@ from ClassWidgets.SDK import ConfigBaseModel
 class MediaWidgetsConfig(ConfigBaseModel):
     # 媒体组件专辑封面右下角的播放源应用图标角标开关
     show_source_badge: bool = False
+
+    # 媒体组件背景
+    media_gradient_background: bool = True
+    media_gradient_intensity: int = 100
+    media_background_progress: bool = True
+    media_background_progress_text: bool = True
+    # 媒体组件副行：artist / progress
+    media_subtitle_content: str = "artist"
+
     # 歌词源：auto / qqmusic / kugou / netease（改源后对当前歌曲立即重抓）
     lyric_source: str = "auto"
-    # 歌词翻译（如有）显示开关：开启时歌词组件原文下方显示译文，
-    # 关闭或无翻译时显示下一行歌词预览
-    show_translation: bool = True
+    # 歌词组件背景
+    lyric_gradient_background: bool = True
+    lyric_gradient_intensity: int = 100
+    # 歌词组件副行：translation_or_next / translation_or_none / next / none
+    lyric_subtitle_content: str = "translation_or_next"

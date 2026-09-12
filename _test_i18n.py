@@ -54,18 +54,24 @@ def translated(catalog, context, source):
 
 samples = {
     "en_US": [("MediaWidgetsSettings", "正在播放", "Now Playing"),
-              ("MediaWidgetsSettings", "显示播放源图标", "Show Source App Icon"),
-              ("MediaWidget", "Playing", "Playing"),
-              ("LyricsWidget", "正在获取歌词…", "Fetching lyrics…")],
+               ("MediaWidgetsSettings", "显示播放源图标", "Show Source App Icon"),
+               ("MediaWidgetsSettings", "小组件自定义", "Customize Widgets"),
+               ("MediaWidgetsSettings", "显示翻译，如没有就显示第二行歌词",
+                "Show translation; show the next lyric if unavailable"),
+               ("MediaWidget", "Playing", "Playing"),
+               ("LyricsWidget", "正在获取歌词…", "Fetching lyrics…")],
     "zh_TW": [("MediaWidgetsSettings", "正在播放", "正在播放"),
-              ("MediaWidgetsSettings", "显示播放源图标", "顯示播放來源圖示"),
-              ("MediaWidget", "Media", "媒體"),
-              ("LyricsWidget", "歌词获取失败", "歌詞取得失敗")],
+               ("MediaWidgetsSettings", "显示播放源图标", "顯示播放來源圖示"),
+               ("MediaWidgetsSettings", "渐变背景", "漸層背景"),
+               ("MediaWidget", "Media", "媒體"),
+               ("LyricsWidget", "歌词获取失败", "歌詞取得失敗")],
     "ja_JP": [("MediaWidgetsSettings", "正在播放", "再生中"),
-              ("MediaWidgetsSettings", "显示播放源图标", "再生元アイコンを表示"),
-              ("MediaWidget", "Media", "メディア")],
+               ("MediaWidgetsSettings", "显示播放源图标", "再生元アイコンを表示"),
+               ("MediaWidgetsSettings", "副行内容", "サブ行の内容"),
+               ("MediaWidget", "Media", "メディア")],
     "zh_CN": [("MediaWidgetsSettings", "正在播放", "正在播放"),
-              ("MediaWidget", "Media", "媒体"),
+               ("MediaWidgetsSettings", "歌词组件", "歌词组件"),
+               ("MediaWidget", "Media", "媒体"),
               ("MediaWidget", "Playing", "播放中")],
 }
 
@@ -74,7 +80,7 @@ for catalog, items in samples.items():
         got = translated(catalog, context, source)
         check(f"{catalog}: {source!r}", got == expect, f"got {got!r}")
 
-# 每份目录 24 条全部为 finished（lrelease 时无遗漏）
+# 每份目录 41 条全部为 finished（lrelease 时无遗漏）
 for catalog in ("en_US", "zh_CN", "zh_TW", "ja_JP"):
     qm = I18N / f"MediaWidgets_{catalog}.qm"
     check(f"{catalog}.qm exists", qm.exists())

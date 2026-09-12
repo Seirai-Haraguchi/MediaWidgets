@@ -108,7 +108,7 @@ def build_stub_effects():
 
 
 class StubMedia(QObject):
-    """媒体后端桩：属性可变，用于驱动角标可见性。"""
+    """媒体后端桩：属性可变，用于驱动角标及背景偏好。"""
     titleChanged = Signal()
     artistChanged = Signal()
     artChanged = Signal()
@@ -121,6 +121,7 @@ class StubMedia(QObject):
     def __init__(self):
         super().__init__()
         self._title = ""
+        self._art = ""
         self._source_icon = ""
 
     @Property(str, notify=titleChanged)
@@ -136,9 +137,14 @@ class StubMedia(QObject):
     def artist(self):
         return "周杰伦"
 
-    @Property(str, constant=True)
+    @Property(str, notify=artChanged)
     def art(self):
-        return ""
+        return self._art
+
+    @art.setter
+    def art(self, v):
+        self._art = v
+        self.artChanged.emit()
 
     @Property(float, constant=True)
     def progress(self):
@@ -179,7 +185,14 @@ class StubConfigs(QObject):
 
     def __init__(self):
         super().__init__()
-        self._prefs = {"show_source_badge": False}
+        self._prefs = {
+            "show_source_badge": False,
+            "media_gradient_background": True,
+            "media_gradient_intensity": 100,
+            "media_background_progress": True,
+            "media_background_progress_text": True,
+            "media_subtitle_content": "artist",
+        }
 
     def set_pref(self, key, value):
         self._prefs[key] = value
@@ -273,8 +286,15 @@ def main():
             fails.append(name)
 
     badge = find_item(root, "sourceBadge")
+    gradient = find_item(root, "gradientBackground")
+    background_progress = find_item(root, "backgroundProgress")
+    background_progress_text = find_item(root, "backgroundProgressText")
     check("sourceBadge found", badge is not None)
-    if badge is None:
+    check("background controls found",
+          gradient is not None and background_progress is not None
+          and background_progress_text is not None)
+    if (badge is None or gradient is None or background_progress is None
+            or background_progress_text is None):
         return 1
 
     # 开关关：无论后端状态如何都不显示
@@ -290,6 +310,28 @@ def main():
     # 开关开 + 有图标 + 有媒体：显示
     media.sourceIcon = "data:image/png;base64,AAAA"
     check("badge visible when enabled", badge.property("visible"))
+
+    # 媒体背景各选项：默认开启，修改后应即时驱动对应图层。
+    media.art = "data:image/png;base64,AAAA"
+    check("gradient shown by default", gradient.property("visible"))
+    check("background progress shown by default", background_progress.property("visible"))
+    check("background progress text shown by default", background_progress_text.property("visible"))
+
+    configs.set_pref("media_gradient_intensity", 35)
+    check("gradient intensity updates live", abs(root.property("gradientIntensity") - 0.35) < 0.001)
+    configs.set_pref("media_gradient_background", False)
+    check("gradient hides when disabled", not gradient.property("visible"))
+    configs.set_pref("media_background_progress", False)
+    check("background progress hides when disabled", not background_progress.property("visible"))
+    configs.set_pref("media_background_progress_text", False)
+    check("background progress text hides when disabled", not background_progress_text.property("visible"))
+
+    configs.set_pref("media_subtitle_content", "progress")
+    check("subtitle can show progress", root.property("text") == "1:23 / 4:29",
+          root.property("text"))
+    configs.set_pref("media_subtitle_content", "artist")
+    check("subtitle can show artist", root.property("text") == "周杰伦",
+          root.property("text"))
 
     # Configs 变更通知驱动：重新关掉开关即时隐藏
     configs.set_pref("show_source_badge", False)

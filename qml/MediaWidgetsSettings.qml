@@ -227,81 +227,240 @@ FluentPage {
         }
     }
 
-    // ---------- 媒体 ----------
+    // ---------- 小组件自定义 ----------
 
     Text {
         Layout.fillWidth: true
         Layout.topMargin: 20
         typography: Typography.BodyStrong
-        text: qsTr("媒体")
+        text: qsTr("小组件自定义")
     }
 
-    // 媒体组件封面右下角的播放源应用图标角标
-    SettingCard {
+    // 媒体组件与歌词组件的设置按页签分组。
+    // 插件自带 Pivot/PivotItem 组件（宿主 RinUI 没有 Pivot，见 Pivot.qml 头注释）。
+    Pivot {
+        id: widgetPivot
+        objectName: "widgetPivot"
         Layout.fillWidth: true
         Layout.topMargin: 4
-        icon.name: "ic_fluent_apps_20_regular"
-        title: qsTr("显示播放源图标")
-        description: qsTr("在媒体组件的专辑封面右下角叠加显示正在播放的应用图标")
 
-        Switch {
-            checked: root.config("show_source_badge", false)
-            onToggled: Configs.setPlugin(root.pluginId, "show_source_badge", checked)
+        PivotItem {
+            objectName: "mediaSettingsPage"
+            text: qsTr("媒体组件")
+            iconName: "ic_fluent_music_note_2_20_regular"
+
+            // 媒体组件封面右下角的播放源应用图标角标
+            SettingCard {
+                Layout.fillWidth: true
+                Layout.topMargin: 4
+                icon.name: "ic_fluent_apps_20_regular"
+                title: qsTr("显示播放源图标")
+                description: qsTr("在媒体组件的专辑封面右下角叠加显示正在播放的应用图标")
+
+                Switch {
+                    checked: root.config("show_source_badge", false)
+                    onToggled: Configs.setPlugin(root.pluginId, "show_source_badge", checked)
+                }
+            }
+
+            SettingCard {
+                Layout.fillWidth: true
+                icon.name: "ic_fluent_color_20_regular"
+                title: qsTr("渐变背景")
+                description: qsTr("使用专辑封面的主色作为媒体组件背景")
+
+                Switch {
+                    checked: root.config("media_gradient_background", true)
+                    onToggled: Configs.setPlugin(root.pluginId, "media_gradient_background", checked)
+                }
+            }
+
+            SettingCard {
+                Layout.fillWidth: true
+                icon.name: "ic_fluent_color_20_regular"
+                title: qsTr("渐变背景浓度")
+                description: qsTr("调整专辑主色渐变的透明度")
+
+                Slider {
+                    id: mediaGradientIntensity
+                    Layout.preferredWidth: 156
+                    from: 0
+                    to: 100
+                    stepSize: 1
+                    value: root.config("media_gradient_intensity", 100)
+                    onMoved: Configs.setPlugin(root.pluginId, "media_gradient_intensity",
+                                                Math.round(value))
+                }
+
+                Text {
+                    text: Math.round(mediaGradientIntensity.value) + "%"
+                    typography: Typography.Caption
+                    color: Colors.proxy.textSecondaryColor
+                }
+            }
+
+            SettingCard {
+                Layout.fillWidth: true
+                icon.name: "ic_fluent_play_circle_20_regular"
+                title: qsTr("背景进度显示")
+                description: qsTr("在媒体组件背景中从左到右显示当前播放进度")
+
+                Switch {
+                    checked: root.config("media_background_progress", true)
+                    onToggled: Configs.setPlugin(root.pluginId, "media_background_progress", checked)
+                }
+            }
+
+            SettingCard {
+                Layout.fillWidth: true
+                icon.name: "ic_fluent_clock_20_regular"
+                title: qsTr("背景进度数字显示")
+                description: qsTr("在媒体组件背景右下角显示已播放时间和总时长")
+
+                Switch {
+                    checked: root.config("media_background_progress_text", true)
+                    onToggled: Configs.setPlugin(root.pluginId, "media_background_progress_text", checked)
+                }
+            }
+
+            SettingCard {
+                Layout.fillWidth: true
+                icon.name: "ic_fluent_text_align_left_20_regular"
+                title: qsTr("副行内容")
+                description: qsTr("选择媒体组件标题下方显示的信息")
+
+                ComboBox {
+                    id: mediaSubtitleCombo
+                    textRole: "label"
+                    model: ListModel {
+                        ListElement { label: qsTr("歌手名"); value: "artist" }
+                        ListElement { label: qsTr("进度数字"); value: "progress" }
+                    }
+
+                    property string currentContent: root.config("media_subtitle_content", "artist")
+                    currentIndex: {
+                        for (var i = 0; i < mediaSubtitleCombo.count; i++)
+                            if (mediaSubtitleCombo.model.get(i).value === currentContent)
+                                return i
+                        return 0
+                    }
+                    onActivated: (index) => {
+                        Configs.setPlugin(root.pluginId, "media_subtitle_content",
+                                          mediaSubtitleCombo.model.get(index).value)
+                    }
+                }
+            }
         }
-    }
 
-    // ---------- 歌词 ----------
+        PivotItem {
+            objectName: "lyricSettingsPage"
+            text: qsTr("歌词组件")
+            iconName: "ic_fluent_subtitles_20_regular"
 
-    Text {
-        Layout.fillWidth: true
-        Layout.topMargin: 20
-        typography: Typography.BodyStrong
-        text: qsTr("歌词")
-    }
+            SettingCard {
+                Layout.fillWidth: true
+                Layout.topMargin: 4
+                icon.name: "ic_fluent_color_20_regular"
+                title: qsTr("渐变背景")
+                description: qsTr("使用专辑封面的主色作为歌词组件背景")
 
-    // 歌词源选择：改动立即生效（对当前歌曲重新抓取）
-    SettingCard {
-        Layout.fillWidth: true
-        Layout.topMargin: 4
-        icon.name: "ic_fluent_music_note_2_20_regular"
-        title: qsTr("歌词源")
-        description: qsTr("「自动」按 QQ → 酷狗 → 网易云顺序取第一个匹配，优先逐字歌词")
-
-        ComboBox {
-            id: sourceCombo
-            textRole: "label"
-            model: ListModel {
-                ListElement { label: qsTr("自动"); value: "auto" }
-                ListElement { label: qsTr("QQ音乐"); value: "qqmusic" }
-                ListElement { label: qsTr("酷狗音乐"); value: "kugou" }
-                ListElement { label: qsTr("网易云音乐"); value: "netease" }
+                Switch {
+                    checked: root.config("lyric_gradient_background", true)
+                    onToggled: Configs.setPlugin(root.pluginId, "lyric_gradient_background", checked)
+                }
             }
 
-            property string currentSource: root.config("lyric_source", "auto")
-            currentIndex: {
-                var idx = 0
-                for (var i = 0; i < sourceCombo.count; i++)
-                    if (sourceCombo.model.get(i).value === currentSource)
-                        idx = i
-                return idx
-            }
-            onActivated: (index) => {
-                Configs.setPlugin(root.pluginId, "lyric_source",
-                                  sourceCombo.model.get(index).value)
-            }
-        }
-    }
+            SettingCard {
+                Layout.fillWidth: true
+                icon.name: "ic_fluent_color_20_regular"
+                title: qsTr("渐变背景浓度")
+                description: qsTr("调整专辑主色渐变的透明度")
 
-    // 歌词翻译（如有）显示开关
-    SettingCard {
-        Layout.fillWidth: true
-        icon.name: "ic_fluent_translate_20_regular"
-        title: qsTr("显示歌词翻译")
-        description: qsTr("有翻译时在歌词组件的原文下方显示译文；无翻译或关闭时显示下一行预览")
+                Slider {
+                    id: lyricGradientIntensity
+                    Layout.preferredWidth: 156
+                    from: 0
+                    to: 100
+                    stepSize: 1
+                    value: root.config("lyric_gradient_intensity", 100)
+                    onMoved: Configs.setPlugin(root.pluginId, "lyric_gradient_intensity",
+                                                Math.round(value))
+                }
 
-        Switch {
-            checked: root.config("show_translation", true)
-            onToggled: Configs.setPlugin(root.pluginId, "show_translation", checked)
+                Text {
+                    text: Math.round(lyricGradientIntensity.value) + "%"
+                    typography: Typography.Caption
+                    color: Colors.proxy.textSecondaryColor
+                }
+            }
+
+            // 歌词源选择：改动立即生效（对当前歌曲重新抓取）
+            SettingCard {
+                Layout.fillWidth: true
+                icon.name: "ic_fluent_music_note_2_20_regular"
+                title: qsTr("歌词源")
+                description: qsTr("「自动」按 QQ → 酷狗 → 网易云顺序取第一个匹配，优先逐字歌词")
+
+                ComboBox {
+                    id: sourceCombo
+                    textRole: "label"
+                    model: ListModel {
+                        ListElement { label: qsTr("自动"); value: "auto" }
+                        ListElement { label: qsTr("QQ音乐"); value: "qqmusic" }
+                        ListElement { label: qsTr("酷狗音乐"); value: "kugou" }
+                        ListElement { label: qsTr("网易云音乐"); value: "netease" }
+                    }
+
+                    property string currentSource: root.config("lyric_source", "auto")
+                    currentIndex: {
+                        for (var i = 0; i < sourceCombo.count; i++)
+                            if (sourceCombo.model.get(i).value === currentSource)
+                                return i
+                        return 0
+                    }
+                    onActivated: (index) => {
+                        Configs.setPlugin(root.pluginId, "lyric_source",
+                                          sourceCombo.model.get(index).value)
+                    }
+                }
+            }
+
+            SettingCard {
+                Layout.fillWidth: true
+                icon.name: "ic_fluent_translate_20_regular"
+                title: qsTr("副行内容")
+                description: qsTr("选择歌词组件原文旁显示的内容")
+
+                ComboBox {
+                    id: lyricSubtitleCombo
+                    textRole: "label"
+                    model: ListModel {
+                        ListElement {
+                            label: qsTr("显示翻译，如没有就显示第二行歌词")
+                            value: "translation_or_next"
+                        }
+                        ListElement {
+                            label: qsTr("显示翻译，如没有就不显示")
+                            value: "translation_or_none"
+                        }
+                        ListElement { label: qsTr("显示第二行歌词"); value: "next" }
+                        ListElement { label: qsTr("不显示"); value: "none" }
+                    }
+
+                    property string currentContent: root.config(
+                        "lyric_subtitle_content", "translation_or_next")
+                    currentIndex: {
+                        for (var i = 0; i < lyricSubtitleCombo.count; i++)
+                            if (lyricSubtitleCombo.model.get(i).value === currentContent)
+                                return i
+                        return 0
+                    }
+                    onActivated: (index) => {
+                        Configs.setPlugin(root.pluginId, "lyric_subtitle_content",
+                                          lyricSubtitleCombo.model.get(index).value)
+                    }
+                }
+            }
         }
     }
 }

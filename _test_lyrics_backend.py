@@ -91,16 +91,16 @@ def test_word_line_and_translation():
     check("last line sub empty", backend.subLine == "" and not backend.subIsTranslation)
 
 
-def test_no_translation_falls_to_next_line():
-    backend, media, _ = make_backend(config={"show_translation": False},
+def test_subtitle_modes():
+    backend, media, _ = make_backend(config={"lyric_subtitle_content": "next"},
                                      fetch=lambda *a: (make_doc(), "qqmusic"))
     backend._on_song_changed("晴天", "周杰伦")
     backend._fetch_worker(backend._gen, "晴天", "周杰伦", media.duration_ms, "auto")
 
-    # 第一行有翻译但开关关闭 → 下一行预览
+    # 第一行有翻译但选择下一行 → 下一行预览
     media._pos = 1500
     backend._on_tick()
-    check("translation off -> next line",
+    check("next mode -> next line",
           backend.subLine == "词 周杰伦" and not backend.subIsTranslation,
           f"{backend.subLine!r} trans={backend.subIsTranslation}")
 
@@ -225,8 +225,8 @@ def test_source_change_triggers_refetch():
     check("refetched with kugou", calls == ["auto", "kugou"], str(calls))
 
 
-def test_translation_toggle_reapplies():
-    cfg = {"show_translation": True}
+def test_subtitle_mode_reapplies():
+    cfg = {"lyric_subtitle_content": "translation_or_next"}
     media = FakeMedia()
 
     def getter(key):
@@ -238,12 +238,32 @@ def test_translation_toggle_reapplies():
     backend._fetch_worker(backend._gen, "晴天", "周杰伦", media.duration_ms, "auto")
     media._pos = 1500
     backend._on_tick()
-    check("translation on", backend.subLine == "Sunny day")
+    check("translation-or-next shows translation", backend.subLine == "Sunny day")
 
-    cfg["show_translation"] = False
+    cfg["lyric_subtitle_content"] = "translation_or_none"
     backend._on_tick()
-    check("translation off reapplied immediately",
+    check("translation-or-none keeps translation when available",
+          backend.subLine == "Sunny day" and backend.subIsTranslation,
+          f"{backend.subLine!r}")
+
+    # 切到下一行：有翻译时也不使用翻译；切到不显示时完全隐藏副行。
+    cfg["lyric_subtitle_content"] = "next"
+    backend._on_tick()
+    check("next mode reapplied immediately",
           backend.subLine == "词 周杰伦" and not backend.subIsTranslation,
+          f"{backend.subLine!r}")
+    cfg["lyric_subtitle_content"] = "none"
+    backend._on_tick()
+    check("none mode reapplied immediately",
+          backend.subLine == "" and not backend.subIsTranslation,
+          f"{backend.subLine!r}")
+
+    # translation-or-none 在无翻译行不回退到下一行。
+    cfg["lyric_subtitle_content"] = "translation_or_none"
+    media._pos = 5500
+    backend._on_tick()
+    check("translation-or-none does not fall back",
+          backend.subLine == "" and not backend.subIsTranslation,
           f"{backend.subLine!r}")
 
 
@@ -274,14 +294,14 @@ def test_song_cleared_to_idle():
 
 if __name__ == "__main__":
     test_word_line_and_translation()
-    test_no_translation_falls_to_next_line()
+    test_subtitle_modes()
     test_line_level_doc_single_word()
     test_seek_updates_line()
     test_stale_generation_discarded()
     test_nomatch_and_error_states()
     test_cache_roundtrip_and_hit()
     test_source_change_triggers_refetch()
-    test_translation_toggle_reapplies()
+    test_subtitle_mode_reapplies()
     test_json_roundtrip()
     test_song_cleared_to_idle()
     print()

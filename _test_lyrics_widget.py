@@ -138,7 +138,7 @@ class StubMedia(QObject):
 
     @Property(str, notify=artChanged)
     def art(self):
-        return ""
+        return "data:image/png;base64,AAAA"
 
     @Property(float, notify=progressChanged)
     def progress(self):
@@ -228,13 +228,25 @@ class StubAppCentral(QObject):
 class StubConfigs(QObject):
     configChanged = Signal()
 
+    def __init__(self):
+        super().__init__()
+        self._prefs = {
+            "lyric_source": "auto",
+            "lyric_gradient_background": True,
+            "lyric_gradient_intensity": 100,
+            "lyric_subtitle_content": "translation_or_next",
+        }
+
+    def set_pref(self, key, value):
+        self._prefs[key] = value
+        self.configChanged.emit()
+
     @Property("QVariant", notify=configChanged)
     def data(self):
         return {
             "preferences": {"font": "", "font_weight": 600, "mini_mode": False},
             "plugins": {"configs": {
-                "com.seiraiharaguchi.mediawidgets": {
-                    "lyric_source": "auto", "show_translation": True}}},
+                "com.seiraiharaguchi.mediawidgets": dict(self._prefs)}},
         }
 
 
@@ -308,6 +320,22 @@ def main():
         print(f"FAIL: {len(page_problems)} widget warnings")
         return 1
     print("widget: loaded without QML errors", flush=True)
+
+    # 歌词组件的渐变背景也应当响应设置页偏好。
+    gradient = next((item for item in root.findChildren(QObject)
+                     if item.property("objectName") == "gradientBackground"), None)
+    if gradient is None or not gradient.property("visible"):
+        print("FAIL: lyrics gradient background should be visible by default")
+        return 1
+    configs.set_pref("lyric_gradient_intensity", 40)
+    if abs(root.property("gradientIntensity") - 0.4) > 0.001:
+        print(f"FAIL: lyrics gradient intensity expected 0.4, got {root.property('gradientIntensity')}")
+        return 1
+    configs.set_pref("lyric_gradient_background", False)
+    if gradient.property("visible"):
+        print("FAIL: lyrics gradient should hide when disabled")
+        return 1
+    print("background: lyrics gradient settings update live", flush=True)
 
     # 逐字 delegate 应当渲染 3 个词；词 0 已唱满（pos 1300 ≥ end 1600？否，1300<1600 → 部分）
     repeater = None

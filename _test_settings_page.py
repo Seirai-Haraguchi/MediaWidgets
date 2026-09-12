@@ -84,8 +84,15 @@ class StubConfigs(QObject):
                 "configs": {
                     "com.seiraiharaguchi.mediawidgets": {
                         "lyrics_enabled": True,
-                        "show_translation": False,
                         "show_source_badge": False,
+                        "media_gradient_background": True,
+                        "media_gradient_intensity": 100,
+                        "media_background_progress": True,
+                        "media_background_progress_text": True,
+                        "media_subtitle_content": "artist",
+                        "lyric_gradient_background": True,
+                        "lyric_gradient_intensity": 100,
+                        "lyric_subtitle_content": "translation_or_next",
                     }
                 }
             }
@@ -154,6 +161,90 @@ def main():
     print(f"backend wired: {root.property('backend') is backend}", flush=True)
     print(f"hasMedia: {root.property('hasMedia')}", flush=True)
 
+    # 给个确定宽度让布局完成隐式尺寸计算，再验证插件自带 Pivot：
+    # PivotItem 子项由 Pivot 自动注册成等量页签头（声明式，非 model/Repeater），
+    # 默认选中首项；页面常驻，仅切换可见性，Pivot 高度随当前页内容自适应。
+    root.setProperty("width", 900)
+    app.processEvents()
+
+    def find_object(name):
+        return next((item for item in root.findChildren(QObject)
+                    if item.property("objectName") == name), None)
+
+    pivot = find_object("widgetPivot")
+    tab_bar = find_object("widgetPivotBar")
+    media_page = find_object("mediaSettingsPage")
+    lyric_page = find_object("lyricSettingsPage")
+    if pivot is None or tab_bar is None or media_page is None or lyric_page is None:
+        print("FAIL: widget customization Pivot pages missing", flush=True)
+        return 1
+
+    # 页签数量与 PivotItem 一一对应：注册了几个页、页签头就建几个
+    # （TabBar.itemAt 返回的 QQuickItem* 无法被 PySide 包装，故按子对象枚举）
+    headers = [
+        item for item in tab_bar.findChildren(QObject)
+        if item.metaObject().indexOfProperty("checked") >= 0
+    ]
+    if pivot.property("count") != 2 or tab_bar.property("count") != 2 or len(headers) != 2:
+        print("FAIL: widget customization Pivot did not register 2 tabs", flush=True)
+        return 1
+
+    # 页索引必须与声明顺序一致：姊妹项的 Component.onCompleted 触发次序与
+    # 声明次序相反，这里是「页签顺序不被反转」的回归守卫
+    pages = [(media_page, "媒体组件", 0), (lyric_page, "歌词组件", 1)]
+    if [page.property("__index") for page, _, _ in pages] != [0, 1]:
+        print("FAIL: Pivot pages registered out of declaration order", flush=True)
+        return 1
+    for page, label, _ in pages:
+        header = next((h for h in headers if h.property("text") == label), None)
+        if header is None:
+            print(f"FAIL: no Pivot header built for '{label}'", flush=True)
+            return 1
+        # 页签头图标经 header.icon.name -> IconWidget.icon 落地，
+        # QQuickIcon 组属性无法跨语言读取，故校验内部 IconWidget 的 icon 串
+        icon_widget = next(
+            (c for c in header.findChildren(QObject)
+             if c.metaObject().indexOfProperty("isFontIcon") >= 0),
+            None,
+        )
+        if icon_widget is None or icon_widget.property("icon") != page.property("iconName"):
+            print(f"FAIL: Pivot header icon for '{label}' not wired to PivotItem", flush=True)
+            return 1
+    print("widget customization: Pivot registered 2 tabs from PivotItem children", flush=True)
+
+    # 默认选中首个页签：仅媒体页可见，且当前页有自适应高度
+    if pivot.property("currentIndex") != 0:
+        print("FAIL: widget customization Pivot default tab not selected", flush=True)
+        return 1
+    if not media_page.property("visible") or lyric_page.property("visible"):
+        print("FAIL: widget customization Pivot default page not shown", flush=True)
+        return 1
+    if media_page.property("implicitHeight") <= 0:
+        print("FAIL: media settings page has no height", flush=True)
+        return 1
+
+    # 切到歌词组件页签：页面常驻不销毁，仅切换可见性，Pivot 高度随内容重算
+    pivot.setProperty("currentIndex", 1)
+    app.processEvents()
+    if pivot.property("currentIndex") != 1:
+        print("FAIL: widget customization Pivot cannot switch tabs", flush=True)
+        return 1
+    if not lyric_page.property("visible") or media_page.property("visible"):
+        print("FAIL: widget customization Pivot tab switch not applied", flush=True)
+        return 1
+    if lyric_page.property("implicitHeight") <= 0:
+        print("FAIL: lyric settings page has no height", flush=True)
+        return 1
+    # 索引与页签头必须对应：选中第 2 项时应当是高亮的「歌词组件」页签头
+    checked = next((h.property("text") for h in headers if h.property("checked")), None)
+    if checked != "歌词组件":
+        print("FAIL: Pivot tab index does not map to expected header", flush=True)
+        return 1
+    if media_page.property("__pivot") is not pivot:
+        print("FAIL: Pivot page lost its host on tab switch", flush=True)
+        return 1
+    print("widget customization: lyric tab shown with adaptive height", flush=True)
+
     # 图标名必须存在于 RinUI 字体图标索引（缺失即页面“缺图标”）
     icon_names = [
         "ic_fluent_music_note_2_20_regular",
@@ -162,6 +253,8 @@ def main():
         "ic_fluent_alert_on_20_regular",
         "ic_fluent_translate_20_regular",
         "ic_fluent_apps_20_regular",
+        "ic_fluent_text_align_left_20_regular",
+        "ic_fluent_subtitles_20_regular",
     ]
     index_js = (
         RINUI_QML_DIR / "RinUI" / "assets" / "fonts" / "FluentSystemIcons-Index.js"

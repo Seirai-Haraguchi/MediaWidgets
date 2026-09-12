@@ -103,7 +103,7 @@ class LyricsBackend(QObject):
         self._artist = ""
         self._source_name = ""
         self._applied_source = None   # 当前 _doc 对应的请求源（含 "auto"）
-        self._last_show_translation = None  # None = 尚未读过（避免首帧误判成"变了"）
+        self._last_subtitle_mode = None  # None = 尚未读过（避免首帧误判成"变了"）
 
         self._words = []         # QVariantList：[{text, startMs, endMs}]
         self._line_text = ""
@@ -190,8 +190,21 @@ class LyricsBackend(QObject):
         source = self._read_config("lyric_source", "auto")
         return source if source in lyrics_providers.AUTO_ORDER else "auto"
 
-    def _show_translation(self):
-        return bool(self._read_config("show_translation", True))
+    def _subtitle_mode(self):
+        """返回歌词组件副行模式，并兼容尚未迁移的旧翻译开关。"""
+        mode = self._read_config("lyric_subtitle_content", None)
+        if mode in {
+            "translation_or_next",
+            "translation_or_none",
+            "next",
+            "none",
+        }:
+            return mode
+
+        # 旧版本只有 show_translation：缺少新字段时保留原来的用户选择。
+        return "translation_or_next" if bool(
+            self._read_config("show_translation", True)
+        ) else "next"
 
     # ---- 换歌：触发歌词获取 ----
 
@@ -282,11 +295,12 @@ class LyricsBackend(QObject):
             self._sync_line()
 
     def _poll_config(self):
-        """设置页改动立即生效：翻译开关 → 重算副行；歌词源 → 对当前歌曲重抓。"""
-        show_trans = self._show_translation()
-        if self._last_show_translation is not None and show_trans != self._last_show_translation:
+        """设置页改动立即生效：副行模式重算；歌词源对当前歌曲重抓。"""
+        subtitle_mode = self._subtitle_mode()
+        if (self._last_subtitle_mode is not None
+                and subtitle_mode != self._last_subtitle_mode):
             self._sync_line(force=True)
-        self._last_show_translation = show_trans
+        self._last_subtitle_mode = subtitle_mode
 
         source = self._configured_source()
         if (self._title and self._applied_source is not None
@@ -332,13 +346,18 @@ class LyricsBackend(QObject):
         else:
             self._words = [{"text": ln.text, "startMs": ln.start_ms, "endMs": ln.end_ms}]
 
-        # 副行：有翻译且开启 → 翻译；否则下一行预览
-        if ln.translation and self._show_translation():
+        # 副行可选：翻译（没有则下一行 / 没有则不显示）、下一行、或不显示。
+        subtitle_mode = self._subtitle_mode()
+        if (ln.translation and subtitle_mode in {
+                "translation_or_next", "translation_or_none"}):
             self._sub_line = ln.translation
             self._sub_is_translation = True
-        else:
+        elif subtitle_mode in {"translation_or_next", "next"}:
             nxt = self._lines[idx + 1] if idx + 1 < len(self._lines) else None
             self._sub_line = nxt.text if nxt is not None else ""
+            self._sub_is_translation = False
+        else:
+            self._sub_line = ""
             self._sub_is_translation = False
 
         self.lineChanged.emit()
