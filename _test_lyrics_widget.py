@@ -179,6 +179,8 @@ class StubLyricsBackend(QObject):
             {"text": " ", "startMs": 1600, "endMs": 2600},
             {"text": "周杰伦", "startMs": 2600, "endMs": 3800},
         ]
+        self._word_timing = True
+        self._sub_line = "Sunny day"
         self._position_ms = 1300
 
     @Property(QObject, constant=True)
@@ -197,9 +199,13 @@ class StubLyricsBackend(QObject):
     def words(self):
         return self._words
 
+    @Property(bool, notify=lineChanged)
+    def wordTiming(self):
+        return self._word_timing
+
     @Property(str, notify=lineChanged)
     def subLine(self):
-        return "Sunny day"
+        return self._sub_line
 
     @Property(bool, notify=lineChanged)
     def subIsTranslation(self):
@@ -213,6 +219,12 @@ class StubLyricsBackend(QObject):
     def set_position(self, ms):
         self._position_ms = ms
         self.positionChanged.emit()
+
+    def set_line(self, words, word_timing=True, sub_line=""):
+        self._words = words
+        self._word_timing = word_timing
+        self._sub_line = sub_line
+        self.lineChanged.emit()
 
     @Property(str, notify=sourceNameChanged)
     def sourceName(self):
@@ -428,8 +440,7 @@ def main():
         return 1
     print("design: no album art image in content", flush=True)
 
-    # 跑马灯跟随：行宽超出视口时 wordRow 向左滚，唱完归 0
-    # 整行宽 ≈ 56+28+84 = 168px；副行块 ≈ 18+~60px
+    # 跑马灯：行宽超出主行 maximumWidth（≤480）时 wordRow 向左滚
     def _find_wordrow():
         # 组合组件实例的 className 带 _QML_N 后缀，不能用精确名匹配
         stack = [root]
@@ -441,46 +452,155 @@ def main():
             stack.extend(item.findChildren(QObject) or [])
         return None
 
+    def _find_sweep():
+        stack = [root]
+        while stack:
+            item = stack.pop()
+            if item.property("wordTiming") is not None and item.property("fillEdgeX") is not None:
+                return item
+            stack.extend(item.findChildren(QObject) or [])
+        return None
+
+    def _wait(ms=200):
+        loop = QEventLoop()
+        QTimer.singleShot(ms, loop.quit)
+        loop.exec()
+
+    # 超长逐字行（远超 480px），用于触发跑马灯
+    long_words = [
+        {"text": "这一句歌词特别特别长用来触发跑马灯滚动效果一二三四五六七八九十",
+         "startMs": 0, "endMs": 8000},
+        {"text": "续上后半句还要更长一些ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+         "startMs": 8000, "endMs": 16000},
+    ]
+    backend.set_line(long_words, word_timing=True, sub_line="Sunny day")
+    backend.set_position(100)
+    root.setProperty("width", 560)
+    _wait(250)
+
     word_row = _find_wordrow()
     if word_row is None:
         print("FAIL: word Row not found")
         return 1
+    sweep = _find_sweep()
+    if sweep is None:
+        print("FAIL: WordSweep not found")
+        return 1
 
     def _row_x():
-        return word_row.property("x")
+        return float(word_row.property("x") or 0)
 
-    # 宽组件：行放得下 → 不滚
-    root.setProperty("width", 560)
-    backend.set_position(3700)
-    loop2 = QEventLoop()
-    QTimer.singleShot(500, loop2.quit)   # 等 Behavior on x 收敛
-    loop2.exec()
-    if abs(_row_x()) > 0.5:
-        print(f"FAIL: wide widget should not scroll, wordRow.x={_row_x()}")
+    row_w = float(word_row.property("implicitWidth") or 0)
+    view_w = float(sweep.property("width") or 0)
+    if row_w <= view_w + 1:
+        print(f"FAIL: expected overflow for marquee, row={row_w:.1f} view={view_w:.1f}")
         return 1
-    print("marquee: wide viewport keeps row at x=0", flush=True)
+    print(f"marquee: overflow ready row={row_w:.1f} view={view_w:.1f}", flush=True)
 
-    # 窄组件：行放不下 → 滚动钳制在 maxScroll（168-视口）
-    root.setProperty("width", 200)
-    loop3 = QEventLoop()
-    QTimer.singleShot(500, loop3.quit)
-    loop3.exec()
+    # 行初：演唱边缘仍在视口左侧锚点内 → 不滚（或几乎不滚）
+    backend.set_position(100)
+    _wait(200)
+    start_x = _row_x()
+    if start_x < -2:
+        print(f"FAIL: early position should not scroll yet, wordRow.x={start_x}")
+        return 1
+    print("marquee: early position keeps row near x=0", flush=True)
+
+    # 行中后段：跟随演唱边缘向左滚，且不超过 maxScroll
+    backend.set_position(12000)
+    _wait(250)
     scroll_x = _row_x()
-    if scroll_x >= 0 or scroll_x < -160:
-        print(f"FAIL: narrow widget should scroll into range, wordRow.x={scroll_x}")
+    max_scroll = row_w - view_w
+    if scroll_x >= -1 or scroll_x < -(max_scroll + 8):
+        print(f"FAIL: mid/late should scroll into range, x={scroll_x} maxScroll={max_scroll:.1f}")
         return 1
-    print(f"marquee: narrow viewport scrolls row to x={scroll_x:.1f}", flush=True)
+    print(f"marquee: follow-scroll x={scroll_x:.1f} (max={max_scroll:.1f})", flush=True)
 
-    # 唱完（超出行尾）→ 停在 maxScroll，不再继续滚
-    backend.set_position(5000)
-    loop4 = QEventLoop()
-    QTimer.singleShot(500, loop4.quit)
-    loop4.exec()
+    # 行尾之后 → 钳制在 maxScroll
+    backend.set_position(20000)
+    _wait(250)
     end_x = _row_x()
-    if abs(end_x - scroll_x) > 8:
-        print(f"FAIL: scroll should clamp at line end, x {scroll_x:.1f} -> {end_x:.1f}")
-        return 1
+    if abs(end_x - (-max_scroll)) > 10 and abs(end_x - scroll_x) > 10:
+        # 允许已在钳位附近；至少不能比上一刻明显继续往左冲
+        if end_x < scroll_x - 10:
+            print(f"FAIL: scroll should clamp at line end, x {scroll_x:.1f} -> {end_x:.1f}")
+            return 1
     print("marquee: scroll clamps at line end", flush=True)
+
+    # 换行到短行：瞬时归位（Behavior 关闭），不从上一行 scrollX 缓动
+    backend.set_line(
+        [{"text": "短", "startMs": 0, "endMs": 1000}],
+        word_timing=True,
+        sub_line="Sunny day",
+    )
+    backend.set_position(100)
+    _wait(50)
+    word_row = _find_wordrow()
+    if abs(_row_x()) > 1.0:
+        print(f"FAIL: line change should snap scroll to 0, wordRow.x={_row_x()}")
+        return 1
+    print("marquee: line change snaps scroll to 0", flush=True)
+
+    # 副行关闭后主行额度回到 480，内容可横向撑开（不再被 root.width 锁死）
+    sweep = _find_sweep()
+    backend.set_line(
+        [{"text": "这是一句足够长的歌词用来撑开组件宽度ABCDEF", "startMs": 0, "endMs": 5000}],
+        word_timing=True,
+        sub_line="",
+    )
+    backend.set_position(100)
+    _wait(200)
+    reserve, err_r = QQmlExpression(engine.rootContext(), sweep, "secondaryReserve").evaluate()
+    max_via_expr, err_m = QQmlExpression(
+        engine.rootContext(), sweep, "mainMaxWidth"
+    ).evaluate()
+    if err_r or reserve is None:
+        print(f"FAIL: secondaryReserve missing on WordSweep: {err_r}")
+        return 1
+    if abs(float(reserve)) > 0.5:
+        print(f"FAIL: secondary disabled should reserve 0, got {reserve}")
+        return 1
+    if err_m or max_via_expr is None or abs(float(max_via_expr) - 480) > 0.5:
+        print(f"FAIL: secondary off → main maxWidth should be 480, got {max_via_expr} err={err_m}")
+        return 1
+    print("width: secondary off restores main maxWidth=480", flush=True)
+
+    # 行级歌词：不应启用卡拉OK裁切层；fillRatio 恒为 1
+    backend.set_line(
+        [{"text": "行级歌词一整行", "startMs": 0, "endMs": 4000}],
+        word_timing=False,
+        sub_line="",
+    )
+    backend.set_position(1000)
+    _wait(200)
+    repeater = None
+    stack = [root]
+    while stack:
+        item = stack.pop()
+        if item.metaObject().className().startswith("QQuickRepeater"):
+            repeater = item
+        stack.extend(item.findChildren(QObject) or [])
+    if repeater is None or repeater.property("count") != 1:
+        print(f"FAIL: line-level should have 1 delegate, count="
+              f"{repeater.property('count') if repeater else None}")
+        return 1
+    d0, errored = QQmlExpression(engine.rootContext(), repeater, "itemAt(0)").evaluate()
+    if errored or d0 is None:
+        print("FAIL: line-level itemAt(0) failed")
+        return 1
+    if abs(float(d0.property("fillRatio")) - 1.0) > 0.001:
+        print(f"FAIL: line-level fillRatio should be 1, got {d0.property('fillRatio')}")
+        return 1
+    clips = [c for c in d0.findChildren(QObject) if c.property("clip") is True]
+    visible_clips = [c for c in clips if c.property("visible") is True]
+    if visible_clips:
+        print(f"FAIL: line-level must not show karaoke clip, visible clips={len(visible_clips)}")
+        return 1
+    wt, _ = QQmlExpression(engine.rootContext(), sweep, "wordTiming").evaluate()
+    if wt is not False:
+        print(f"FAIL: sweep.wordTiming should be false for line-level, got {wt}")
+        return 1
+    print("karaoke: line-level lyrics skip fill sweep", flush=True)
 
     print("PASS: lyrics widget loaded and renders word delegates")
     return 0

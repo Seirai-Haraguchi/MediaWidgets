@@ -15,9 +15,11 @@ import RinUI as Rin         // 限定名导入：只用 Theme/Utils 单例，避
 //   字重跟随用户偏好 Configs.data.preferences.font_weight，不再硬编码
 // - 副行（译文 / 下一句预览）：dynamicNotification 同款行内双文本模式，
 //   用框架 MarqueeTitle（超宽自动跑马灯滚动），mini 模式隐藏
-// - 宽度交给框架：视口随组件宽度自适应（扣掉副行块，480 封顶）；行宽超视口时
-//   不再硬切，而是整行向左滚动（跑马灯跟随逐字演唱位置，行内唱完自动归位）
-// - 卡拉OK填充扫描：逐字歌词（QRC/KRC）按词填充，行级歌词（LRC）整行一个词，同一套动画
+// - 宽度：主行按内容自然撑开组件（480 封顶），副行启用时从其额度中扣掉副行块；
+//   不再绑定 root.width（否则内容无法反过来撑宽组件，副行关闭时横向空间浪费）
+// - 卡拉OK填充扫描：仅当后端 wordTiming=true（QRC/KRC 逐字）时启用；
+//   行级 LRC 只高亮整行，不做填充扫描
+// - 超宽跑马灯：逐字跟随演唱边缘；行级按行内进度推进；换行时瞬时归位避免抽搐
 // - 前奏期间显示第一行（未填充的暗色预览），唱到后自然开始填充
 // - 背景层：仅专辑图双主色渐变；可在插件设置中调整开关与浓度
 
@@ -74,7 +76,10 @@ Widget {
 
     Connections {
         target: root.backend
-        function onLineChanged() { linePop.restart() }
+        function onLineChanged() {
+            sweepRow.prepareLineChange()
+            linePop.restart()
+        }
     }
 
     // 背景层：专辑图双主色渐变（从左到右淡出），圆角跟随框架 cornerRadius 以契合各主题
@@ -129,12 +134,17 @@ Widget {
         WordSweep {
             id: sweepRow
             visible: !statusText.visible
-            // 视口随组件宽度走（扣掉副行块，480 封顶、120 兜底）：
-            // 行宽超出视口时组件不再被撑宽，由 WordSweep 跑马灯跟随滚动
-            Layout.maximumWidth: Math.max(120, Math.min(480, root.width - root.padding * 2
-                - (subLabel.visible ? subLabel.width + 18 : 0)))
+            // 内容驱动撑宽：主行最多 480；副行可见时从其额度扣掉副行块（含分隔线间距），
+            // 副行关闭后额度还给主行，组件可横向扩展到满幅可用宽度。
+            // 切勿绑定 root.width——会形成「宽度由内容决定、内容上限又跟宽度走」的死锁，
+            // 导致副行关闭后主行仍卡在窄视口、只能靠跑马灯硬滚。
+            readonly property real secondaryReserve: subLabel.visible ? (subLabel.width + 18) : 0
+            // 短行按字宽撑开；长行顶到 maximumWidth 后由跑马灯滚动
+            readonly property real mainMaxWidth: Math.max(120, 480 - secondaryReserve)
+            Layout.maximumWidth: mainMaxWidth
             clip: true
             words: backend ? backend.words : []
+            wordTiming: backend ? backend.wordTiming : false
             positionMs: backend ? backend.positionMs : 0
             baseColor: root.unsungColor
             fillColor: root.sungColor
@@ -164,20 +174,40 @@ Widget {
     }
 
     // 逐字卡拉OK行：底层未唱文字 + 顶层已唱文字按词宽裁切，随 positionMs 填充；
-    // 行宽超出视口时整行向左滚动（跑马灯跟随演唱位置），行宽放得下时静止
+    // 行级歌词关闭填充，整行以 fillColor 显示；超宽时整行向左滚动
     component WordSweep: Item {
         id: sweep
         property var words: []
+        property bool wordTiming: false
         property int positionMs: 0
         property color baseColor: "#808080"
         property color fillColor: "#FFFFFF"
         property int pixelSize: 20
         property int fontWeight: 600
+        // 换行瞬间关闭滚动 Behavior，避免从上一行缓动造成抽搐/错位
+        property bool scrollAnimating: true
+        // 实际应用到 wordRow.x；与 scrollX 目标分离，换行时可瞬时吸附
+        property real displayedScrollX: 0
 
         implicitWidth: wordRow.implicitWidth
         implicitHeight: wordRow.implicitHeight
 
-        // 当前唱到的像素边缘（行内坐标）：已唱词计整宽，正在唱的词按比例推进
+        Behavior on displayedScrollX {
+            enabled: sweep.scrollAnimating
+            // 短于后端 100ms 节拍，跟随及时且不在两次 tick 间拖尾
+            NumberAnimation { duration: 90; easing.type: Easing.OutCubic }
+        }
+
+        function prepareLineChange() {
+            // 换行总是从行首显示：瞬时归零，避免沿用上一行偏移或 Repeater 抛光前的错误目标
+            scrollAnimating = false
+            displayedScrollX = 0
+            Qt.callLater(function () { sweep.scrollAnimating = true })
+        }
+
+        onScrollXChanged: displayedScrollX = scrollX
+
+        // 当前唱到的像素边缘：只统计已唱/正在唱的词（忽略尚未开唱的后续词）
         readonly property real fillEdgeX: {
             var pos = sweep.positionMs
             var edge = 0
@@ -187,25 +217,44 @@ Widget {
                 var w = it.modelData
                 if (!w)
                     continue
-                var frac = pos >= w.endMs ? 1.0
-                         : pos <= w.startMs ? 0.0
-                         : (pos - w.startMs) / Math.max(1, w.endMs - w.startMs)
-                edge = Math.max(edge, it.x + it.width * frac)
+                if (!sweep.wordTiming) {
+                    edge = Math.max(edge, it.x + it.width)
+                    continue
+                }
+                if (pos >= w.endMs)
+                    edge = Math.max(edge, it.x + it.width)
+                else if (pos > w.startMs)
+                    edge = Math.max(edge, it.x + it.width
+                                    * (pos - w.startMs) / Math.max(1, w.endMs - w.startMs))
             }
             return edge
         }
 
-        // 跑马灯跟随：唱到边缘锚定在视口 30% 处向左滚，行宽放得下时不动，且不滚过行尾
+        // 跑马灯目标偏移：
+        // - 放得下：0
+        // - 逐字：演唱边缘锚定在视口约 35% 处，不滚过行尾
+        // - 行级：按行起止进度映射到 [0, maxScroll]
         readonly property real scrollX: {
             var maxScroll = Math.max(0, wordRow.implicitWidth - sweep.width)
-            return -Math.max(0, Math.min(maxScroll, fillEdgeX - sweep.width * 0.3))
+            if (maxScroll <= 0)
+                return 0
+            if (!sweep.wordTiming) {
+                var w0 = (sweep.words && sweep.words.length) ? sweep.words[0] : null
+                if (!w0)
+                    return 0
+                var span = Math.max(1, w0.endMs - w0.startMs)
+                var t = (sweep.positionMs - w0.startMs) / span
+                t = Math.max(0, Math.min(1, t))
+                return -maxScroll * t
+            }
+            var anchor = sweep.width * 0.35
+            return -Math.max(0, Math.min(maxScroll, fillEdgeX - anchor))
         }
 
         Row {
             id: wordRow
             spacing: 0
-            x: sweep.scrollX
-            Behavior on x { NumberAnimation { duration: 250; easing.type: Easing.OutQuad } }
+            x: sweep.displayedScrollX
 
             Repeater {
                 model: sweep.words
@@ -216,8 +265,10 @@ Widget {
                     implicitWidth: baseText.width
                     implicitHeight: baseText.height
 
-                    // 已唱比例：词内线性推进，唱完为 1
+                    // 已唱比例：无逐字时间戳时整词点亮；有则词内线性推进
                     readonly property real fillRatio: {
+                        if (!sweep.wordTiming)
+                            return 1.0
                         var w = wordItem.modelData
                         var pos = sweep.positionMs
                         if (pos >= w.endMs) return 1.0
@@ -228,21 +279,24 @@ Widget {
                     Text {
                         id: baseText
                         text: wordItem.modelData.text
-                        color: sweep.baseColor
+                        // 行级：底层也用满色，避免看起来像卡在唱完态的卡拉OK
+                        color: sweep.wordTiming ? sweep.baseColor : sweep.fillColor
                         font.family: root.baseFont.family
                         font.pixelSize: sweep.pixelSize
                         font.weight: sweep.fontWeight
                     }
 
+                    // 卡拉OK顶层裁切：仅逐字模式启用
                     Item {
+                        visible: sweep.wordTiming
                         anchors.left: parent.left
                         anchors.top: parent.top
                         anchors.bottom: parent.bottom
                         width: baseText.width * wordItem.fillRatio
                         clip: true
-                        // 与后端 100ms 节拍同长的线性插值 → 连续扫描
                         Behavior on width {
-                            NumberAnimation { duration: 100; easing.type: Easing.Linear }
+                            enabled: sweep.wordTiming && sweep.scrollAnimating
+                            NumberAnimation { duration: 90; easing.type: Easing.Linear }
                         }
 
                         Text {

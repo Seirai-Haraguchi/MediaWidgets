@@ -77,6 +77,7 @@ def test_word_line_and_translation():
     check("intro preview line0", backend.lineText == "晴天 周杰伦", backend.lineText)
     check("intro preview words", [w["text"] for w in backend.words] == ["晴天", " ", "周杰伦"],
           str(backend.words))
+    check("intro word timing on", backend.wordTiming is True)
     check("intro sub is translation", backend.subLine == "Sunny day" and backend.subIsTranslation)
 
     media._pos = 1200  # 第一行内："晴"唱到一半
@@ -117,7 +118,7 @@ def test_subtitle_modes():
 
 
 def test_line_level_doc_single_word():
-    """行级歌词（网易云 LRC）→ 整行一个 word，QML 同一套扫描动画。"""
+    """行级歌词（网易云 LRC）→ 整行一个 word，但 wordTiming=False（不走卡拉OK）。"""
     doc = lp.LyricsDocument([
         lp.LyricLine(0, 4000, "第一行", [], None),
         lp.LyricLine(4000, 4000, "第二行", [], "Line 2"),
@@ -130,11 +131,23 @@ def test_line_level_doc_single_word():
     check("line-level single word",
           backend.words == [{"text": "第一行", "startMs": 0, "endMs": 4000}],
           str(backend.words))
+    check("line-level has no word timing", backend.wordTiming is False)
     # 第一行无翻译 → 下一行预览
     check("line-level next-line preview", backend.subLine == "第二行", backend.subLine)
     media._pos = 5000
     backend._on_tick()
     check("line-level sub translation", backend.subLine == "Line 2", backend.subLine)
+
+
+def test_word_timing_flag_for_qrc():
+    """逐字行 wordTiming=True，供 QML 开启卡拉OK填充。"""
+    backend, media, _ = make_backend(fetch=lambda *a: (make_doc(), "qqmusic"))
+    backend._on_song_changed("晴天", "周杰伦")
+    backend._fetch_worker(backend._gen, "晴天", "周杰伦", media.duration_ms, "auto")
+    media._pos = 1200
+    backend._on_tick()
+    check("word-level timing enabled", backend.wordTiming is True)
+    check("word-level has multiple words", len(backend.words) >= 2, str(backend.words))
 
 
 def test_seek_updates_line():
@@ -296,6 +309,7 @@ if __name__ == "__main__":
     test_word_line_and_translation()
     test_subtitle_modes()
     test_line_level_doc_single_word()
+    test_word_timing_flag_for_qrc()
     test_seek_updates_line()
     test_stale_generation_discarded()
     test_nomatch_and_error_states()

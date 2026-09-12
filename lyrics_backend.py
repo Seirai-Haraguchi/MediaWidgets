@@ -6,7 +6,9 @@ lyrics_backend.py
 
 - 完全不动灵动通知：渲染全部在插件自己的歌词小组件里完成；
 - 逐字歌词（QQ QRC / 酷狗 KRC）输出 word 级 [{text, startMs, endMs}]，
-  行级歌词（网易云 LRC）输出整行单 word —— QML 统一用「填充扫描」卡拉OK动画；
+  并置 wordTiming=true，QML 走卡拉OK 填充扫描；
+- 行级歌词（网易云 LRC）输出整行单 word + wordTiming=false，
+  QML 只显示当前行（不套逐字填充效果）；
 - 副行规则：当前行有翻译且开启翻译 → 显示翻译；否则显示下一行歌词预览；
 - 歌词源可在设置页切换（auto/QQ/酷狗/网易云），切换后对当前歌曲立即重抓。
 
@@ -106,6 +108,7 @@ class LyricsBackend(QObject):
         self._last_subtitle_mode = None  # None = 尚未读过（避免首帧误判成"变了"）
 
         self._words = []         # QVariantList：[{text, startMs, endMs}]
+        self._word_timing = False  # 当前行是否含逐字时间戳（决定是否启用卡拉OK）
         self._line_text = ""
         self._sub_line = ""
         self._sub_is_translation = False
@@ -156,6 +159,11 @@ class LyricsBackend(QObject):
     @Property("QVariantList", notify=lineChanged)
     def words(self):
         return self._words
+
+    @Property(bool, notify=lineChanged)
+    def wordTiming(self):
+        """当前行是否含词级时间戳；行级 LRC 为 False，不应套卡拉OK填充。"""
+        return self._word_timing
 
     @Property(str, notify=lineChanged)
     def subLine(self):
@@ -337,14 +345,17 @@ class LyricsBackend(QObject):
         ln = self._lines[idx]
         self._line_text = ln.text
 
-        # 逐字行输出 word 列表；行级歌词整行一个 word（QML 同一套填充扫描）
+        # 逐字行输出 word 列表；行级歌词整行一个 word，但 wordTiming=false
+        # （QML 据此关闭卡拉OK填充，避免整行被误扫）
         if ln.words:
             self._words = [
                 {"text": w.text, "startMs": w.start_ms, "endMs": w.end_ms}
                 for w in ln.words
             ]
+            self._word_timing = True
         else:
             self._words = [{"text": ln.text, "startMs": ln.start_ms, "endMs": ln.end_ms}]
+            self._word_timing = False
 
         # 副行可选：翻译（没有则下一行 / 没有则不显示）、下一行、或不显示。
         subtitle_mode = self._subtitle_mode()
@@ -367,6 +378,7 @@ class LyricsBackend(QObject):
             return
         self._line_text = ""
         self._words = []
+        self._word_timing = False
         self._sub_line = ""
         self._sub_is_translation = False
         self.lineChanged.emit()
