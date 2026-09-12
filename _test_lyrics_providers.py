@@ -108,11 +108,29 @@ def test_netease_provider_parse():
     print("PASS netease line model")
 
 
+def test_meaningful_lyrics_filter():
+    empty = lp.LyricsDocument([], "netease")
+    assert not lp.is_meaningful_lyrics(empty)
+    assert not lp.is_meaningful_lyrics(None)
+    instrumental = lp.LyricsDocument(
+        [lp.LyricLine(0, 1000, "纯音乐"), lp.LyricLine(1000, 2000, "Instrumental")],
+        "netease",
+    )
+    assert not lp.is_meaningful_lyrics(instrumental)
+    real = lp.LyricsDocument(
+        [lp.LyricLine(0, 1000, "纯音乐"), lp.LyricLine(1000, 2000, "真正的歌词")],
+        "netease",
+    )
+    assert lp.is_meaningful_lyrics(real)
+    print("PASS meaningful lyrics filter")
+
+
 if __name__ == "__main__":
     test_parse_qrc()
     test_parse_krc()
     test_apply_lrc_translation()
     test_decrypt_krc_roundtrip()
     test_netease_provider_parse()
+    test_meaningful_lyrics_filter()
     print("ALL PASS")
     sys.exit(0)

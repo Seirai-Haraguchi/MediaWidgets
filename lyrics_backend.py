@@ -268,7 +268,11 @@ class LyricsBackend(QObject):
             return
         # 按请求时的源记账：抓取期间用户改了源，_poll_config 会发现不一致并重抓
         self._applied_source = requested_source
-        if doc is None or not doc.lines:
+        # 无文档、空行、纯音乐/无实质歌词 → nomatch（或网络 error），
+        # QML 据此自动隐藏组件，避免无可用内容时占位。
+        if (doc is None
+                or not doc.lines
+                or not lyrics_providers.is_meaningful_lyrics(doc)):
             self._doc = None
             self._lines = []
             self._index = -1

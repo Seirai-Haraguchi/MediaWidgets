@@ -47,6 +47,7 @@ def build_stub_module():
         "    id: widgetBase\n"
         "    property string text: ''\n"
         "    property bool miniMode: false\n"
+        "    property bool editMode: false\n"
         "    property var backend: null\n"
         "    property real cornerRadius: height * 0.22\n"
         "    property real padding: miniMode ? 16 : 24\n"
@@ -75,6 +76,7 @@ def build_stub_module():
         "Item {\n"
         "    property alias text: label.text\n"
         "    property alias color: label.color\n"
+        "    property alias font: label.font\n"
         "    property int maximumWidth: 200\n"
         "    property int speed: 50\n"
         "    implicitWidth: Math.min(label.implicitWidth, maximumWidth)\n"
@@ -174,6 +176,7 @@ class StubLyricsBackend(QObject):
     def __init__(self, media, parent=None):
         super().__init__(parent)
         self._media = media
+        self._state = "ready"
         self._words = [
             {"text": "晴天", "startMs": 1000, "endMs": 1600},
             {"text": " ", "startMs": 1600, "endMs": 2600},
@@ -189,7 +192,12 @@ class StubLyricsBackend(QObject):
 
     @Property(str, notify=stateChanged)
     def state(self):
-        return "ready"
+        return self._state
+
+    @Slot(str)
+    def set_state(self, state):
+        self._state = state
+        self.stateChanged.emit()
 
     @Property(str, notify=lineChanged)
     def lineText(self):
@@ -395,7 +403,8 @@ def main():
             return 1
     print("fill: unsung words stay at 0.000", flush=True)
 
-    # 逐字填充结构：每个词 delegate = 底层暗字 + clip 内顶层亮字
+    # 逐字填充结构：每个词 delegate = 辉光字 + 底层暗字 + clip 内顶层亮字
+    # （辉光 Text 默认不可见，仅长音激活；结构上始终存在）
     # delegate 自身子项的 QObject 树正常，可用 findChildren
     def _is_text(o):
         cls = o.metaObject().className()
@@ -404,12 +413,16 @@ def main():
     texts = [c for c in delegates[0].findChildren(QObject) if _is_text(c)]
     clips = [c for c in delegates[0].findChildren(QObject)
              if c.property("clip") is True]
-    if len(texts) != 2 or len(clips) != 1:
+    # 至少底层暗字 + clip 内亮字；辉光 Text 可能因 layer/不可见而不计入部分绑定树
+    if len(texts) < 2 or len(clips) != 1:
         print(f"FAIL: word0 structure: texts={len(texts)} clips={len(clips)}")
         return 1
     clip_item = clips[0]
     top_text = next(t for t in texts if t.parent() is clip_item)
-    base_text = next(t for t in texts if t is not top_text)
+    base_text = next(
+        t for t in texts
+        if t.parent() is delegates[0] and t.property("text") == "晴天"
+    )
     if clip_item.property("width") <= 0 or top_text.property("text") != "晴天":
         print(f"FAIL: clip width={clip_item.property('width')} top text={top_text.property('text')}")
         print(f"DEBUG: base width={base_text.property('width')} implicit={base_text.property('implicitWidth')} "
@@ -424,7 +437,7 @@ def main():
         print("DEBUG3:", " <- ".join(chain))
         return 1
     print(f"karaoke: clip width={clip_item.property('width'):.1f}px "
-          f"of base {base_text.property('width'):.1f}px", flush=True)
+          f"of base {base_text.property('width'):.1f}px (texts={len(texts)})", flush=True)
 
     # mini 模式切回正常再渲染一次（字体/尺寸分支不炸）
     root.setProperty("miniMode", True)
@@ -601,6 +614,92 @@ def main():
         print(f"FAIL: sweep.wordTiming should be false for line-level, got {wt}")
         return 1
     print("karaoke: line-level lyrics skip fill sweep", flush=True)
+
+    # 行级歌词不得启用长音辉光
+    if d0.property("longNoteEligible") or d0.property("glowActive"):
+        print(f"FAIL: line-level must not be glow-eligible "
+              f"(eligible={d0.property('longNoteEligible')} active={d0.property('glowActive')})")
+        return 1
+    print("glow: line-level lyrics never glow", flush=True)
+
+    # 长音逐字：时长 >1000ms 时应在唱段内激活辉光
+    backend.set_line(
+        [{"text": "长音", "startMs": 0, "endMs": 2500}],
+        word_timing=True,
+        sub_line="",
+    )
+    backend.set_position(1200)
+    _wait(200)
+    repeater = None
+    stack = [root]
+    while stack:
+        item = stack.pop()
+        if item.metaObject().className().startswith("QQuickRepeater"):
+            repeater = item
+        stack.extend(item.findChildren(QObject) or [])
+    d_long, errored = QQmlExpression(engine.rootContext(), repeater, "itemAt(0)").evaluate()
+    if errored or d_long is None:
+        print("FAIL: long-note itemAt(0) failed")
+        return 1
+    if not d_long.property("longNoteEligible"):
+        print("FAIL: word >1000ms should be long-note eligible")
+        return 1
+    if not d_long.property("glowActive") or float(d_long.property("glowLevel") or 0) <= 0.02:
+        print(f"FAIL: long note mid-progress should glow, "
+              f"active={d_long.property('glowActive')} level={d_long.property('glowLevel')}")
+        return 1
+    # 短词不触发
+    backend.set_line(
+        [{"text": "短", "startMs": 0, "endMs": 800}],
+        word_timing=True,
+        sub_line="",
+    )
+    backend.set_position(400)
+    _wait(150)
+    d_short, _ = QQmlExpression(engine.rootContext(), repeater, "itemAt(0)").evaluate()
+    if d_short and (d_short.property("longNoteEligible") or d_short.property("glowActive")):
+        print("FAIL: word ≤1000ms must not glow")
+        return 1
+    print("glow: long-note glow activates only for word-timed notes >1000ms", flush=True)
+
+    # 无可用歌词时塌缩；loading 保持占位；ready 再恢复
+    backend.set_state("nomatch")
+    _wait(100)
+    hide_h = root.property("height")
+    if root.property("shouldShow") or (hide_h is not None and float(hide_h) > 0.5):
+        print(f"FAIL: nomatch should hide widget, "
+              f"shouldShow={root.property('shouldShow')} h={hide_h}")
+        return 1
+    backend.set_state("loading")
+    _wait(100)
+    if not root.property("shouldShow"):
+        print("FAIL: loading must keep widget visible to avoid flicker")
+        return 1
+    backend.set_state("ready")
+    _wait(100)
+    ready_h = root.property("height")
+    if not root.property("shouldShow") or ready_h is None or float(ready_h) < 1:
+        print(f"FAIL: ready should restore widget, "
+              f"shouldShow={root.property('shouldShow')} h={ready_h}")
+        return 1
+    print("visibility: hide on nomatch, keep during loading, restore on ready", flush=True)
+
+    # 字体设置：原文/译文分别生效；译文回退到下一句时仍用原文字体
+    configs.set_pref("lyric_font_original", "Consolas")
+    configs.set_pref("lyric_font_weight_original", 700)
+    configs.set_pref("lyric_font_translation", "Courier New")
+    configs.set_pref("lyric_font_weight_translation", 300)
+    _wait(50)
+    if root.property("originalFontFamily") != "Consolas":
+        print(f"FAIL: original font family, got {root.property('originalFontFamily')}")
+        return 1
+    if int(root.property("originalFontWeight") or 0) != 700:
+        print(f"FAIL: original font weight, got {root.property('originalFontWeight')}")
+        return 1
+    if root.property("translationFontFamily") != "Courier New":
+        print(f"FAIL: translation font family, got {root.property('translationFontFamily')}")
+        return 1
+    print("fonts: original/translation settings apply live", flush=True)
 
     print("PASS: lyrics widget loaded and renders word delegates")
     return 0

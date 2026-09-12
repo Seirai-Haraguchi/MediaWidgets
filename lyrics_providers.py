@@ -43,6 +43,12 @@ AUTO_ORDER = ("qqmusic", "kugou", "netease")
 # QQ/酷狗候选自带秒级时长，按 MediaIsland 思路用标题+艺人+时长近似折算成 5.5 分制
 _ACCEPT = 3.0
 
+# 无实质歌词内容的占位行（纯音乐 / 伴奏等）：整份文档若只剩这类行则视为不可用
+_INSTRUMENTAL_LINE = re.compile(
+    r"^(?:纯音乐|伴奏|人声伴奏|instrumental|inst\.?|karaoke|no\s*lyrics?|无歌词)\s*$",
+    re.I,
+)
+
 
 class LyricWord:
     __slots__ = ("start_ms", "end_ms", "text")
@@ -75,6 +81,17 @@ class LyricsDocument:
     @property
     def has_word_timing(self):
         return any(line.words for line in self.lines)
+
+
+def is_meaningful_lyrics(doc):
+    """文档是否含可展示的实质歌词（排除空行与纯音乐占位）。"""
+    if doc is None or not doc.lines:
+        return False
+    for ln in doc.lines:
+        text = (ln.text or "").strip()
+        if text and not _INSTRUMENTAL_LINE.match(text):
+            return True
+    return False
 
 
 # ---- HTTP 基础 ----
@@ -455,7 +472,8 @@ def fetch_document(title, artist, duration_ms, source="auto"):
             if song is None or score < _ACCEPT:
                 continue
             doc = provider.fetch(song)
-            if doc is not None and doc.lines:
+            # 空文档、纯音乐占位、或无实质歌词 → 当作本源失败，继续尝试下一源
+            if doc is not None and is_meaningful_lyrics(doc):
                 return doc, sid
         except Exception as e:
             last_err = e

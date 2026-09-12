@@ -461,6 +461,135 @@ FluentPage {
                     }
                 }
             }
+
+            // 歌词字体：RinUI SettingExpander + SettingItem，与 CW2 全局字体设置同构
+            SettingExpander {
+                id: lyricFontExpander
+                Layout.fillWidth: true
+                icon.name: "ic_fluent_text_font_20_regular"
+                title: qsTr("歌词字体")
+                description: qsTr("分别为原文、译文与罗马音歌词设置字体和字重。留空或选择「跟随全局字体」时，使用全局字体设置中的主界面字体。")
+
+                readonly property var fontFamilies: {
+                    var families = Qt.fontFamilies().slice().sort()
+                    families.unshift(qsTr("跟随全局字体"))
+                    return families
+                }
+
+                function fontIndex(saved) {
+                    if (!saved || saved === "" || saved === "Follow global font"
+                            || saved === qsTr("跟随全局字体"))
+                        return 0
+                    var i = fontFamilies.indexOf(saved)
+                    return i >= 0 ? i : 0
+                }
+
+                function weightIndex(saved) {
+                    var n = Number(saved)
+                    if (!n || n <= 0)
+                        return 0
+                    return Math.max(0, Math.min(9, Math.round(n / 100)))
+                }
+
+                SettingItem {
+                    title: qsTr("原文")
+                    description: qsTr("显示原文歌词时使用的字体和字重。")
+
+                    ComboBox {
+                        id: originalFontCombo
+                        Layout.preferredWidth: 168
+                        model: lyricFontExpander.fontFamilies
+                        currentIndex: lyricFontExpander.fontIndex(
+                            root.config("lyric_font_original", ""))
+                        onActivated: (index) => {
+                            Configs.setPlugin(root.pluginId, "lyric_font_original",
+                                              index <= 0 ? "" : originalFontCombo.model[index])
+                        }
+                    }
+
+                    ComboBox {
+                        id: originalWeightCombo
+                        Layout.preferredWidth: 120
+                        model: [
+                            qsTr("跟随全局"), "Thin", "Extra Light", "Light",
+                            "Regular", "Medium", "Semi Bold", "Bold",
+                            "Extra Bold", "Black"
+                        ]
+                        currentIndex: lyricFontExpander.weightIndex(
+                            root.config("lyric_font_weight_original", 0))
+                        onActivated: (index) => {
+                            Configs.setPlugin(root.pluginId, "lyric_font_weight_original",
+                                              index <= 0 ? 0 : index * 100)
+                        }
+                    }
+                }
+
+                SettingItem {
+                    title: qsTr("译文")
+                    description: qsTr("显示译文歌词时使用的字体和字重。若该行无译文而回退到原文，仍按原文设置渲染。")
+
+                    ComboBox {
+                        id: translationFontCombo
+                        Layout.preferredWidth: 168
+                        model: lyricFontExpander.fontFamilies
+                        currentIndex: lyricFontExpander.fontIndex(
+                            root.config("lyric_font_translation", ""))
+                        onActivated: (index) => {
+                            Configs.setPlugin(root.pluginId, "lyric_font_translation",
+                                              index <= 0 ? "" : translationFontCombo.model[index])
+                        }
+                    }
+
+                    ComboBox {
+                        id: translationWeightCombo
+                        Layout.preferredWidth: 120
+                        model: [
+                            qsTr("跟随全局"), "Thin", "Extra Light", "Light",
+                            "Regular", "Medium", "Semi Bold", "Bold",
+                            "Extra Bold", "Black"
+                        ]
+                        currentIndex: lyricFontExpander.weightIndex(
+                            root.config("lyric_font_weight_translation", 0))
+                        onActivated: (index) => {
+                            Configs.setPlugin(root.pluginId, "lyric_font_weight_translation",
+                                              index <= 0 ? 0 : index * 100)
+                        }
+                    }
+                }
+
+                SettingItem {
+                    title: qsTr("罗马音")
+                    description: qsTr("显示罗马音歌词时使用的字体和字重。")
+
+                    ComboBox {
+                        id: romanizedFontCombo
+                        Layout.preferredWidth: 168
+                        model: lyricFontExpander.fontFamilies
+                        currentIndex: lyricFontExpander.fontIndex(
+                            root.config("lyric_font_romanized", ""))
+                        onActivated: (index) => {
+                            Configs.setPlugin(root.pluginId, "lyric_font_romanized",
+                                              index <= 0 ? "" : romanizedFontCombo.model[index])
+                        }
+                    }
+
+                    ComboBox {
+                        id: romanizedWeightCombo
+                        Layout.preferredWidth: 120
+                        model: [
+                            qsTr("跟随全局"), "Thin", "Extra Light", "Light",
+                            "Regular", "Medium", "Semi Bold", "Bold",
+                            "Extra Bold", "Black"
+                        ]
+                        currentIndex: lyricFontExpander.weightIndex(
+                            root.config("lyric_font_weight_romanized", 0))
+                        onActivated: (index) => {
+                            Configs.setPlugin(root.pluginId, "lyric_font_weight_romanized",
+                                              index <= 0 ? 0 : index * 100)
+                        }
+                    }
+                }
+            }
         }
     }
 }

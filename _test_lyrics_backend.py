@@ -305,6 +305,20 @@ def test_song_cleared_to_idle():
     check("line cleared", backend.lineText == "" and backend.words == [])
 
 
+def test_instrumental_document_is_nomatch():
+    """纯音乐占位行视为无可用歌词，进入 nomatch 以便组件自动隐藏。"""
+    instrumental = lp.LyricsDocument(
+        [lp.LyricLine(0, 5000, "纯音乐", [], None)],
+        "netease",
+        "Theme",
+    )
+    backend, media, _ = make_backend(fetch=lambda *a: (instrumental, "netease"))
+    backend._on_song_changed("Theme", "Artist")
+    backend._fetch_worker(backend._gen, "Theme", "Artist", media.duration_ms, "auto")
+    check("instrumental → nomatch", backend.state == "nomatch", backend.state)
+    check("instrumental clears line", backend.lineText == "" and backend.words == [])
+
+
 if __name__ == "__main__":
     test_word_line_and_translation()
     test_subtitle_modes()
@@ -318,6 +332,7 @@ if __name__ == "__main__":
     test_subtitle_mode_reapplies()
     test_json_roundtrip()
     test_song_cleared_to_idle()
+    test_instrumental_document_is_nomatch()
     print()
     if fails:
         print(f"FAILED: {fails}")

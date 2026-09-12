@@ -19,6 +19,8 @@ import RinUI as Rin         // 限定名导入：只用 Theme/Utils 单例，避
 //   不再绑定 root.width（否则内容无法反过来撑宽组件，副行关闭时横向空间浪费）
 // - 卡拉OK填充扫描：仅当后端 wordTiming=true（QRC/KRC 逐字）时启用；
 //   行级 LRC 只高亮整行，不做填充扫描
+// - 长音辉光：参考 MediaIsland / AMLL，仅逐字长音（>1000ms）启用，行级绝不套用
+// - 无可用歌词时自动塌缩占位（loading 除外，避免搜索闪烁）；有效歌词到来后自动恢复
 // - 超宽跑马灯：逐字跟随演唱边缘；行级按行内进度推进；换行时瞬时归位避免抽搐
 // - 前奏期间显示第一行（未填充的暗色预览），唱到后自然开始填充
 // - 背景层：仅专辑图双主色渐变；可在插件设置中调整开关与浓度
@@ -45,16 +47,65 @@ Widget {
         return isNaN(value) ? 1.0 : Math.max(0, Math.min(100, value)) / 100
     }
 
+    // 有可用歌词 / 正在搜索 / 编辑模式 → 占位；nomatch/error/idle 塌缩，避免无内容占空间
+    // loading 不算「无歌词」，防止搜索过程中组件闪烁消失
+    readonly property bool lyricsUsable: backend && backend.state === "ready"
+    readonly property bool lyricsLoading: backend && backend.state === "loading"
+    readonly property bool shouldShow: lyricsUsable || lyricsLoading || editMode
+
+    // 无可用内容时强制塌缩；恢复后解除 Binding，交还 Widget 自身的宽高计算
+    Binding {
+        target: root
+        property: "height"
+        value: 0
+        when: !root.shouldShow
+    }
+    Binding {
+        target: root
+        property: "implicitWidth"
+        value: 0
+        when: !root.shouldShow
+    }
+
     // 与 CW2 Title 同标尺：正常 28、mini 20，切换时 400ms 过渡（Title.qml 同款动画）
     property int titlePx: miniMode ? 20 : 28
     Behavior on titlePx { NumberAnimation { duration: 400; easing.type: Easing.OutQuint } }
 
     // 字重跟随用户偏好（Title/Subtitle 的取值方式），不再硬编码 700
-    readonly property int titleWeight: Configs.data.preferences.font_weight || 600
+    readonly property int globalFontWeight: Configs.data.preferences.font_weight || 600
 
     // CW2 Text.qml 同款字体方式：QFont 整对象赋值在 PySide6 下会丢子属性，
     // 必须拆成 family/pixelSize/weight 子属性分别绑定
     readonly property var baseFont: AppCentral.getQFont(Configs.data.preferences.font, Rin.Utils.fontFamily)
+
+    function _fontFollowsGlobal(value) {
+        if (value === undefined || value === null)
+            return true
+        var s = ("" + value).trim()
+        return s === "" || s === "Follow global font" || s === qsTr("跟随全局字体")
+    }
+
+    function _weightFollowsGlobal(value) {
+        var n = Number(value)
+        return value === undefined || value === null || isNaN(n) || n <= 0
+    }
+
+    readonly property string originalFontFamily: {
+        var f = pluginConfig ? pluginConfig.lyric_font_original : ""
+        return _fontFollowsGlobal(f) ? baseFont.family : f
+    }
+    readonly property int originalFontWeight: {
+        var w = pluginConfig ? pluginConfig.lyric_font_weight_original : 0
+        return _weightFollowsGlobal(w) ? globalFontWeight : Math.round(Number(w))
+    }
+    readonly property string translationFontFamily: {
+        var f = pluginConfig ? pluginConfig.lyric_font_translation : ""
+        return _fontFollowsGlobal(f) ? baseFont.family : f
+    }
+    readonly property int translationFontWeight: {
+        var w = pluginConfig ? pluginConfig.lyric_font_weight_translation : 0
+        return _weightFollowsGlobal(w) ? globalFontWeight : Math.round(Number(w))
+    }
 
     // 卡拉OK双色：已唱满色、未唱半透明；主文字色不用专辑主色，保证任何封面下都可读
     readonly property color sungColor: Rin.Theme.isDark() ? "#FFFFFF" : "#1B1B1B"
@@ -87,7 +138,8 @@ Widget {
         objectName: "gradientBackground"
         anchors.fill: parent
         radius: root.cornerRadius
-        visible: root.gradientBackgroundEnabled && root.media && root.media.art !== ""
+        visible: root.shouldShow && root.gradientBackgroundEnabled
+                 && root.media && root.media.art !== ""
         gradient: Gradient {
             orientation: Gradient.Horizontal
             GradientStop {
@@ -110,6 +162,7 @@ Widget {
         anchors.left: parent.left
         anchors.verticalCenter: parent.verticalCenter
         spacing: 8
+        visible: root.shouldShow
 
         // 当前行：状态文案 与 逐字扫描 二选一，同为 Title 标尺
         // 状态文案用框架 Title（CW2 内置组件的占位写法，如 Nothing right now）
@@ -149,7 +202,8 @@ Widget {
             baseColor: root.unsungColor
             fillColor: root.sungColor
             pixelSize: root.titlePx
-            fontWeight: root.titleWeight
+            fontFamily: root.originalFontFamily
+            fontWeight: root.originalFontWeight
         }
 
         // 正文与副文本之间的 2px 分隔线（dynamicNotification 同款）
@@ -163,6 +217,7 @@ Widget {
         }
 
         // 副行：译文更亮、下一句预览更暗；MarqueeTitle 超宽自动跑马灯
+        // 回退到原文/下一句时仍用原文字体设置（仅真实译文走译文字体）
         MarqueeTitle {
             id: subLabel
             visible: !miniMode && sweepRow.visible && text !== ""
@@ -170,6 +225,10 @@ Widget {
             maximumWidth: 200
             speed: 100
             opacity: backend && backend.subIsTranslation ? 0.62 : 0.38
+            font.family: backend && backend.subIsTranslation
+                         ? root.translationFontFamily : root.originalFontFamily
+            font.weight: backend && backend.subIsTranslation
+                         ? root.translationFontWeight : root.originalFontWeight
         }
     }
 
@@ -183,6 +242,7 @@ Widget {
         property color baseColor: "#808080"
         property color fillColor: "#FFFFFF"
         property int pixelSize: 20
+        property string fontFamily: ""
         property int fontWeight: 600
         // 换行瞬间关闭滚动 Behavior，避免从上一行缓动造成抽搐/错位
         property bool scrollAnimating: true
@@ -206,6 +266,48 @@ Widget {
         }
 
         onScrollXChanged: displayedScrollX = scrollX
+
+        // MediaIsland / AMLL 长音辉光辅助：平滑贝塞尔波峰，避免突兀起停
+        function sampleCubicBezier(parameter, control1, control2) {
+            var inverse = 1 - parameter
+            return (3 * inverse * inverse * parameter * control1)
+                    + (3 * inverse * parameter * parameter * control2)
+                    + (parameter * parameter * parameter)
+        }
+
+        function evaluateCubicBezier(x, cX1, cY1, cX2, cY2) {
+            x = Math.max(0, Math.min(1, x))
+            var lower = 0, upper = 1, parameter = x
+            for (var i = 0; i < 20; i++) {
+                var currentX = sampleCubicBezier(parameter, cX1, cX2)
+                if (Math.abs(currentX - x) < 0.000001)
+                    break
+                if (currentX < x)
+                    lower = parameter
+                else
+                    upper = parameter
+                parameter = (lower + upper) / 2
+            }
+            return sampleCubicBezier(parameter, cY1, cY2)
+        }
+
+        function emphasisWaveResponse(progress) {
+            progress = Math.max(0, Math.min(1, progress))
+            if (progress <= 0 || progress >= 1)
+                return 0
+            return progress < 0.5
+                   ? evaluateCubicBezier(progress / 0.5, 0.2, 0.4, 0.58, 1)
+                   : 1 - evaluateCubicBezier((progress - 0.5) / 0.5, 0.3, 0, 0.58, 1)
+        }
+
+        function emphasisBlur(durationMs, isLastWord) {
+            var blur = Math.max(1000, durationMs) / 3000
+            blur = blur > 1 ? Math.sqrt(blur) : Math.pow(blur, 3)
+            blur *= 0.5
+            if (isLastWord)
+                blur *= 1.5
+            return Math.min(0.8, blur)
+        }
 
         // 当前唱到的像素边缘：只统计已唱/正在唱的词（忽略尚未开唱的后续词）
         readonly property real fillEdgeX: {
@@ -262,6 +364,7 @@ Widget {
                 delegate: Item {
                     id: wordItem
                     required property var modelData
+                    required property int index
                     implicitWidth: baseText.width
                     implicitHeight: baseText.height
 
@@ -276,12 +379,85 @@ Widget {
                         return (pos - w.startMs) / Math.max(1, w.endMs - w.startMs)
                     }
 
+                    // 长音辉光：仅逐字且时长 >1000ms；行级永不启用
+                    readonly property real wordDurationMs: {
+                        var w = wordItem.modelData
+                        return w ? Math.max(0, w.endMs - w.startMs) : 0
+                    }
+                    readonly property bool longNoteEligible: sweep.wordTiming && wordDurationMs > 1000
+                    readonly property bool isLastWord: {
+                        return sweep.words && wordItem.index === sweep.words.length - 1
+                    }
+                    readonly property real glowBlur: {
+                        if (!longNoteEligible)
+                            return 0
+                        return sweep.emphasisBlur(wordDurationMs, isLastWord)
+                    }
+                    readonly property real glowResponse: {
+                        if (!longNoteEligible)
+                            return 0
+                        var w = wordItem.modelData
+                        var pos = sweep.positionMs
+                        if (pos <= w.startMs || pos >= w.endMs)
+                            return 0
+                        var progress = (pos - w.startMs) / Math.max(1, w.endMs - w.startMs)
+                        return sweep.emphasisWaveResponse(progress)
+                    }
+                    readonly property real glowLevel: Math.max(0, Math.min(1, glowBlur * glowResponse))
+                    readonly property bool glowActive: longNoteEligible && glowLevel > 0.02
+                    readonly property real glowRadiusPx: {
+                        if (glowBlur <= 0)
+                            return 0
+                        var em = Math.min(0.3, glowBlur * 0.3)
+                        return Math.min(12, sweep.pixelSize * em)
+                    }
+                    readonly property real glowOpacity: Math.max(0, Math.min(1, glowLevel * 1.7))
+
+                    // 长音辉光层：MediaIsland 回退同款环向采样，画在填充之下，
+                    // 融入卡拉OK 而非独立叠层；仅逐字长音激活
+                    Item {
+                        id: glowLayer
+                        anchors.fill: parent
+                        visible: wordItem.glowActive
+                        opacity: wordItem.glowOpacity
+                        z: -1
+                        Behavior on opacity {
+                            NumberAnimation { duration: 90; easing.type: Easing.OutCubic }
+                        }
+
+                        Repeater {
+                            model: wordItem.glowActive ? 8 : 0
+                            delegate: Text {
+                                required property int index
+                                readonly property real angle: Math.PI * 2 * index / 8
+                                x: Math.cos(angle) * Math.max(1, wordItem.glowRadiusPx)
+                                y: Math.sin(angle) * Math.max(1, wordItem.glowRadiusPx)
+                                text: wordItem.modelData.text
+                                color: sweep.fillColor
+                                opacity: 0.55 / 8
+                                font.family: sweep.fontFamily
+                                font.pixelSize: sweep.pixelSize
+                                font.weight: sweep.fontWeight
+                            }
+                        }
+
+                        // 中心柔光：略抬不透明度，形成连续 bloom
+                        Text {
+                            text: wordItem.modelData.text
+                            color: sweep.fillColor
+                            opacity: 0.35
+                            font.family: sweep.fontFamily
+                            font.pixelSize: sweep.pixelSize
+                            font.weight: sweep.fontWeight
+                        }
+                    }
+
                     Text {
                         id: baseText
                         text: wordItem.modelData.text
                         // 行级：底层也用满色，避免看起来像卡在唱完态的卡拉OK
                         color: sweep.wordTiming ? sweep.baseColor : sweep.fillColor
-                        font.family: root.baseFont.family
+                        font.family: sweep.fontFamily
                         font.pixelSize: sweep.pixelSize
                         font.weight: sweep.fontWeight
                     }
@@ -304,7 +480,7 @@ Widget {
                             anchors.verticalCenter: parent.verticalCenter
                             text: wordItem.modelData.text
                             color: sweep.fillColor
-                            font.family: root.baseFont.family
+                            font.family: sweep.fontFamily
                             font.pixelSize: sweep.pixelSize
                             font.weight: sweep.fontWeight
                         }

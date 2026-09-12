@@ -260,6 +260,7 @@ def main():
         "ic_fluent_text_description_20_regular",
         "ic_fluent_cloud_arrow_down_20_regular",
         "ic_fluent_translate_20_regular",
+        "ic_fluent_text_font_20_regular",
     ]
     index_js = (
         RINUI_QML_DIR / "RinUI" / "assets" / "fonts" / "FluentSystemIcons-Index.js"

@@ -152,8 +152,14 @@ def search_songs(query, limit=_SEARCH_LIMIT):
 
 
 def fetch_lyrics(song_id):
-    """同时抓取原词 lrc 与翻译 tlyric，返回 (lrc_text, tlrc_text)。"""
+    """同时抓取原词 lrc 与翻译 tlyric，返回 (lrc_text, tlrc_text)。
+
+    纯音乐 / 无歌词标记（nolyric / sgc / sfy）视为无可用歌词，返回空串，
+    由上层走 nomatch 并隐藏歌词组件，避免占位。
+    """
     data = _get_json(f"{_LYRIC_URL}?id={song_id}&lv=1&kv=1&tv=-1")
+    if data.get("nolyric") or data.get("sgc") or data.get("sfy"):
+        return "", ""
     lrc = ((data.get("lrc") or {}).get("lyric")) or ""
     tlrc = ((data.get("tlyric") or {}).get("lyric")) or ""
     return lrc, tlrc

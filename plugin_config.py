@@ -32,3 +32,11 @@ class MediaWidgetsConfig(ConfigBaseModel):
     lyric_gradient_intensity: int = 100
     # 歌词组件副行：translation_or_next / translation_or_none / next / none
     lyric_subtitle_content: str = "translation_or_next"
+
+    # 歌词字体：空字符串 / 0 表示跟随全局主界面字体与字重
+    lyric_font_original: str = ""
+    lyric_font_weight_original: int = 0
+    lyric_font_translation: str = ""
+    lyric_font_weight_translation: int = 0
+    lyric_font_romanized: str = ""
+    lyric_font_weight_romanized: int = 0
