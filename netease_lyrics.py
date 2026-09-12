@@ -21,7 +21,9 @@ import urllib.parse
 import urllib.request
 from collections import Counter
 
-_SEARCH_URL = "https://music.163.com/api/search/get/web"
+# `/api/search/get/web` 现已把 result 改为加密字符串；插件没有网页端密钥，
+# 使用仍返回原始 JSON 结构的兼容接口。
+_SEARCH_URL = "https://music.163.com/api/search/get"
 _LYRIC_URL = "https://music.163.com/api/song/lyric"
 
 _HEADERS = {
@@ -140,7 +142,13 @@ def _get_json(url):
 def search_songs(query, limit=_SEARCH_LIMIT):
     params = urllib.parse.urlencode({"s": query, "type": 1, "limit": limit, "offset": 0})
     data = _get_json(f"{_SEARCH_URL}?{params}")
-    return (data.get("result") or {}).get("songs") or []
+    if not isinstance(data, dict):
+        return []
+    result = data.get("result")
+    if not isinstance(result, dict):
+        return []
+    songs = result.get("songs")
+    return songs if isinstance(songs, list) else []
 
 
 def fetch_lyrics(song_id):
