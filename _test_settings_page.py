@@ -250,11 +250,16 @@ def main():
         "ic_fluent_music_note_2_20_regular",
         "ic_fluent_pause_20_regular",
         "ic_fluent_play_20_regular",
-        "ic_fluent_alert_on_20_regular",
+        "ic_fluent_album_20_regular",
+        "ic_fluent_slide_text_20_regular",
+        "ic_fluent_app_generic_20_regular",
+        "ic_fluent_paint_brush_20_regular",
+        "ic_fluent_transparency_square_20_regular",
+        "ic_fluent_data_bar_horizontal_20_regular",
+        "ic_fluent_timer_20_regular",
+        "ic_fluent_text_description_20_regular",
+        "ic_fluent_cloud_arrow_down_20_regular",
         "ic_fluent_translate_20_regular",
-        "ic_fluent_apps_20_regular",
-        "ic_fluent_text_align_left_20_regular",
-        "ic_fluent_subtitles_20_regular",
     ]
     index_js = (
         RINUI_QML_DIR / "RinUI" / "assets" / "fonts" / "FluentSystemIcons-Index.js"

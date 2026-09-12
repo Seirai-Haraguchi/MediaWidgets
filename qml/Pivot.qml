@@ -4,12 +4,13 @@ import QtQuick.Layouts
 import RinUI
 
 // WinUI 风格 Pivot：页签条 + 单页内容区。宿主 RinUI 未提供 Pivot 组件，
-// 这里基于其原生 SelectorBar 自实现，对外保持 Pivot/PivotItem 写法：
+// 这里基于其原生 Segmented 自实现（与设置 → 插件主页的分段页签同款），
+// 对外保持 Pivot/PivotItem 写法：
 //
 //   Pivot {
 //       PivotItem {
 //           text: qsTr("媒体组件")
-//           iconName: "ic_fluent_music_note_2_20_regular"
+//           iconName: "ic_fluent_album_20_regular"
 //           // 页面内容作为默认子项直接声明
 //       }
 //   }
@@ -90,7 +91,8 @@ ColumnLayout {
         }
     }
 
-    SelectorBar {
+    // 与宿主设置 → 插件主页同一套 Segmented 页签样式（圆角底 + 选中块）
+    Segmented {
         id: tabBar
         objectName: "widgetPivotBar"
         Layout.fillWidth: true
@@ -105,7 +107,7 @@ ColumnLayout {
     Component {
         id: headerComponent
 
-        SelectorBarItem {
+        SegmentedItem {
             property var __page: null
             text: __page !== null ? __page.text : ""
             icon.name: __page !== null ? __page.iconName : ""

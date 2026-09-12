@@ -247,13 +247,13 @@ FluentPage {
         PivotItem {
             objectName: "mediaSettingsPage"
             text: qsTr("媒体组件")
-            iconName: "ic_fluent_music_note_2_20_regular"
+            iconName: "ic_fluent_album_20_regular"
 
             // 媒体组件封面右下角的播放源应用图标角标
             SettingCard {
                 Layout.fillWidth: true
                 Layout.topMargin: 4
-                icon.name: "ic_fluent_apps_20_regular"
+                icon.name: "ic_fluent_app_generic_20_regular"
                 title: qsTr("显示播放源图标")
                 description: qsTr("在媒体组件的专辑封面右下角叠加显示正在播放的应用图标")
 
@@ -265,7 +265,7 @@ FluentPage {
 
             SettingCard {
                 Layout.fillWidth: true
-                icon.name: "ic_fluent_color_20_regular"
+                icon.name: "ic_fluent_paint_brush_20_regular"
                 title: qsTr("渐变背景")
                 description: qsTr("使用专辑封面的主色作为媒体组件背景")
 
@@ -277,7 +277,7 @@ FluentPage {
 
             SettingCard {
                 Layout.fillWidth: true
-                icon.name: "ic_fluent_color_20_regular"
+                icon.name: "ic_fluent_transparency_square_20_regular"
                 title: qsTr("渐变背景浓度")
                 description: qsTr("调整专辑主色渐变的透明度")
 
@@ -301,7 +301,7 @@ FluentPage {
 
             SettingCard {
                 Layout.fillWidth: true
-                icon.name: "ic_fluent_play_circle_20_regular"
+                icon.name: "ic_fluent_data_bar_horizontal_20_regular"
                 title: qsTr("背景进度显示")
                 description: qsTr("在媒体组件背景中从左到右显示当前播放进度")
 
@@ -313,7 +313,7 @@ FluentPage {
 
             SettingCard {
                 Layout.fillWidth: true
-                icon.name: "ic_fluent_clock_20_regular"
+                icon.name: "ic_fluent_timer_20_regular"
                 title: qsTr("背景进度数字显示")
                 description: qsTr("在媒体组件背景右下角显示已播放时间和总时长")
 
@@ -325,7 +325,7 @@ FluentPage {
 
             SettingCard {
                 Layout.fillWidth: true
-                icon.name: "ic_fluent_text_align_left_20_regular"
+                icon.name: "ic_fluent_text_description_20_regular"
                 title: qsTr("副行内容")
                 description: qsTr("选择媒体组件标题下方显示的信息")
 
@@ -355,12 +355,12 @@ FluentPage {
         PivotItem {
             objectName: "lyricSettingsPage"
             text: qsTr("歌词组件")
-            iconName: "ic_fluent_subtitles_20_regular"
+            iconName: "ic_fluent_slide_text_20_regular"
 
             SettingCard {
                 Layout.fillWidth: true
                 Layout.topMargin: 4
-                icon.name: "ic_fluent_color_20_regular"
+                icon.name: "ic_fluent_paint_brush_20_regular"
                 title: qsTr("渐变背景")
                 description: qsTr("使用专辑封面的主色作为歌词组件背景")
 
@@ -372,7 +372,7 @@ FluentPage {
 
             SettingCard {
                 Layout.fillWidth: true
-                icon.name: "ic_fluent_color_20_regular"
+                icon.name: "ic_fluent_transparency_square_20_regular"
                 title: qsTr("渐变背景浓度")
                 description: qsTr("调整专辑主色渐变的透明度")
 
@@ -397,7 +397,7 @@ FluentPage {
             // 歌词源选择：改动立即生效（对当前歌曲重新抓取）
             SettingCard {
                 Layout.fillWidth: true
-                icon.name: "ic_fluent_music_note_2_20_regular"
+                icon.name: "ic_fluent_cloud_arrow_down_20_regular"
                 title: qsTr("歌词源")
                 description: qsTr("「自动」按 QQ → 酷狗 → 网易云顺序取第一个匹配，优先逐字歌词")
 
