@@ -20,7 +20,11 @@ import RinUI as Rin         // 限定名导入：只用 Theme/Utils 单例，避
 // - 卡拉OK填充扫描：仅当后端 wordTiming=true（QRC/KRC 逐字）时启用；
 //   行级 LRC 只高亮整行，不做填充扫描
 // - 长音辉光：参考 MediaIsland / AMLL，仅逐字长音（>1000ms）启用，行级绝不套用
-// - 无可用歌词时自动塌缩占位（loading 除外，避免搜索闪烁）；有效歌词到来后自动恢复
+// - 间奏显示：参考 MediaIsland 的 InterludeDotsPresenter——相邻两行之间存在
+//   ≥4s 的长空档（含开头前奏）时，主行换成三个共享基线、依次点亮的呼吸点；
+//   间奏末尾 250ms 由后端提前切到下一句预览，收尾不回落上一句
+// - 无可用歌词时不再把组件从布局里抹掉：对齐 CW2 动态通知的空状态写法——
+//   宽度归零 + 不可见 + 进出场淡入淡出，组件本身始终留在宿主组件列表里
 // - 超宽跑马灯：逐字跟随演唱边缘；行级按行内进度推进；换行时瞬时归位避免抽搐
 // - 前奏期间显示第一行（未填充的暗色预览），唱到后自然开始填充
 // - 背景层：仅专辑图双主色渐变；可在插件设置中调整开关与浓度
@@ -47,24 +51,100 @@ Widget {
         return isNaN(value) ? 1.0 : Math.max(0, Math.min(100, value)) / 100
     }
 
-    // 有可用歌词 / 正在搜索 / 编辑模式 → 占位；nomatch/error/idle 塌缩，避免无内容占空间
+    // 有可用歌词 / 正在搜索 / 编辑模式 → 显示；nomatch/error/idle 才隐藏
     // loading 不算「无歌词」，防止搜索过程中组件闪烁消失
     readonly property bool lyricsUsable: backend && backend.state === "ready"
     readonly property bool lyricsLoading: backend && backend.state === "loading"
     readonly property bool shouldShow: lyricsUsable || lyricsLoading || editMode
 
-    // 无可用内容时强制塌缩；恢复后解除 Binding，交还 Widget 自身的宽高计算
-    Binding {
-        target: root
-        property: "height"
-        value: 0
-        when: !root.shouldShow
+    // 当前是否处于间奏：主行换成呼吸点（后端只在「有文档且落在长空档内」时为真）
+    readonly property bool interludeActive: backend !== null
+                                            && backend.state === "ready" && backend.interlude
+
+    // 隐藏行为对齐 CW2 动态通知组件的空状态：组件始终留在宿主组件列表里
+    // （注册、顺序、位置、配置都原样保留），只是宽度归零 + 不可见，
+    // 有效歌词回来时自动恢复，不需要重新登记或手动还原。
+    // 刻意不再把 height / implicitWidth 绑成 0：那会让组件在宿主 Flow 里连不可见的
+    // 占位都不剩，还会把同列第一个组件的 height（以及「添加」按钮的高度）一并带成 0。
+    property bool actualVisible: true
+    visible: actualVisible
+    width: actualVisible ? implicitWidth : 0
+
+    function applyVisibility() {
+        if (shouldShow) {
+            exitAnim.stop()
+            if (!actualVisible)
+                actualVisible = true
+            enterAnim.restart()
+        } else {
+            enterAnim.stop()
+            exitAnim.restart()
+        }
     }
-    Binding {
-        target: root
-        property: "implicitWidth"
-        value: 0
-        when: !root.shouldShow
+    onShouldShowChanged: applyVisibility()
+    Component.onCompleted: actualVisible = shouldShow
+
+    // 入场：先归零一帧再淡入 / 轻微放大，避免原生出现造成生硬跳变
+    SequentialAnimation {
+        id: enterAnim
+        NumberAnimation {
+            target: root
+            property: "opacity"
+            from: 0
+            to: 0
+            duration: 1
+        }
+        ParallelAnimation {
+            NumberAnimation {
+                target: root
+                property: "opacity"
+                from: 0
+                to: 1
+                duration: 300
+                easing.type: Easing.OutCubic
+            }
+            NumberAnimation {
+                target: root
+                property: "scale"
+                from: 0.8
+                to: 1
+                duration: 400
+                easing.type: Easing.OutBack
+            }
+        }
+        onFinished: {
+            if (!root.shouldShow)
+                root.actualVisible = false
+        }
+    }
+
+    // 退场：淡出 + 轻微缩小，播完才真正隐藏，保证与「恢复显示」不会互相打架
+    SequentialAnimation {
+        id: exitAnim
+        ParallelAnimation {
+            NumberAnimation {
+                target: root
+                property: "opacity"
+                from: 1
+                to: 0
+                duration: 200
+                easing.type: Easing.InQuad
+            }
+            NumberAnimation {
+                target: root
+                property: "scale"
+                from: 1
+                to: 0.9
+                duration: 250
+                easing.type: Easing.InQuad
+            }
+        }
+        onFinished: {
+            if (!root.shouldShow) {
+                root.actualVisible = false
+                root.scale = 1
+            }
+        }
     }
 
     // 与 CW2 Title 同标尺：正常 28、mini 20，切换时 400ms 过渡（Title.qml 同款动画）
@@ -186,7 +266,7 @@ Widget {
 
         WordSweep {
             id: sweepRow
-            visible: !statusText.visible
+            visible: !statusText.visible && !root.interludeActive
             // 内容驱动撑宽：主行最多 480；副行可见时从其额度扣掉副行块（含分隔线间距），
             // 副行关闭后额度还给主行，组件可横向扩展到满幅可用宽度。
             // 切勿绑定 root.width——会形成「宽度由内容决定、内容上限又跟宽度走」的死锁，
@@ -204,6 +284,18 @@ Widget {
             pixelSize: root.titlePx
             fontFamily: root.originalFontFamily
             fontWeight: root.originalFontWeight
+        }
+
+        // 间奏：三个呼吸点占住主行的位置，间奏结束后换回下一句歌词
+        InterludeDots {
+            id: interludeDots
+            objectName: "interludeDots"
+            visible: root.interludeActive
+            startMs: backend ? backend.interludeStartMs : 0
+            endMs: backend ? backend.interludeEndMs : 0
+            positionMs: backend ? backend.positionMs : 0
+            color: root.sungColor
+            pixelSize: root.titlePx
         }
 
         // 正文与副文本之间的 2px 分隔线（dynamicNotification 同款）
@@ -484,6 +576,114 @@ Widget {
                             font.pixelSize: sweep.pixelSize
                             font.weight: sweep.fontWeight
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    // 间奏呼吸点：三个点共享同一条基线与缩放，只靠透明度依次点亮，
+    // 因此不会出现逐点位移的跳动感。动画数学与 MediaIsland 的
+    // InterludeDotsPresenter 对齐（时间单位 ms）：
+    // - 呼吸周期按 1.5s 向上取整后均分整段间奏，最后一个完整周期恰好落在间奏内
+    // - 入场 2s 指数缓出 + 前 500ms 不可见、再 500ms 淡入，避免刚进入间奏就闪现
+    // - 收尾 750ms 缩小、最后 375ms 淡出，交接给下一句的暗色预览
+    // 时间来源是后端 100ms 节拍，所以每个动画输出都挂 90ms 缓动，
+    // 与卡拉OK填充 / 跑马灯同一套节拍约定
+    component InterludeDots: Item {
+        id: dots
+
+        property int startMs: 0
+        property int endMs: 0
+        property int positionMs: 0
+        property color color: "#FFFFFF"
+        property int pixelSize: 28
+
+        readonly property real durationMs: Math.max(0, endMs - startMs)
+        readonly property real elapsedMs: Math.max(0, Math.min(durationMs, positionMs - startMs))
+        readonly property real remainingMs: durationMs - elapsedMs
+        readonly property real breatheMs: durationMs / Math.max(1, Math.ceil(durationMs / 1500))
+        // 点半径按字号缩放并夹在 [2, 5.5]，与参考实现同量级
+        readonly property real dotRadius: Math.max(2, Math.min(5.5, pixelSize * 0.22))
+        readonly property real dotSpacing: dotRadius * 3.3
+        readonly property real dotsDuration: Math.max(1, durationMs - 750)
+
+        readonly property real waveScale: {
+            if (durationMs <= 0)
+                return 0
+            var value = 1 + Math.sin(1.5 * Math.PI - (elapsedMs / breatheMs) * 2) / 20
+            if (elapsedMs < 2000)
+                value *= easeOutExpo(elapsedMs / 2000)
+            if (remainingMs < 750)
+                value *= 1 - easeInOutBack((750 - remainingMs) / 750 / 2)
+            return Math.max(0, value) * 0.82
+        }
+
+        readonly property real globalOpacity: {
+            if (durationMs <= 0 || elapsedMs <= 0)
+                return 0
+            var value = 1
+            if (elapsedMs < 500)
+                value = 0
+            else if (elapsedMs < 1000)
+                value = (elapsedMs - 500) / 500
+            if (remainingMs < 375)
+                value *= Math.max(0, Math.min(1, remainingMs / 375))
+            return Math.max(0, Math.min(1, value))
+        }
+
+        // 三个点按可见期的 1/3 时差依次淡入，最低透明度 0.25，后两点不会长时间全灭
+        function dotOpacity(index) {
+            var raw = (elapsedMs - dotsDuration / 3 * index) * 3 / dotsDuration * 0.75
+            var staggered = Math.max(0.25, Math.min(1, raw))
+            return Math.max(0, Math.min(1, staggered * globalOpacity))
+        }
+
+        function easeOutExpo(progress) {
+            if (progress <= 0)
+                return 0
+            if (progress >= 1)
+                return 1
+            return 1 - Math.pow(2, -10 * progress)
+        }
+
+        function easeInOutBack(progress) {
+            var p = Math.max(0, Math.min(1, progress))
+            var factor = 1.70158 * 1.525
+            return p < 0.5
+                    ? Math.pow(2 * p, 2) * ((factor + 1) * 2 * p - factor) / 2
+                    : (Math.pow(2 * p - 2, 2) * ((factor + 1) * (p * 2 - 2) + factor) + 2) / 2
+        }
+
+        // 预留放大后的点与点距，避免呼吸缩放在边缘被 RowLayout 裁掉
+        implicitWidth: (dotRadius * 2 + dotSpacing * 2) * 1.1
+        implicitHeight: Math.max(pixelSize * 1.2, dotRadius * 2 * 1.1)
+
+        Item {
+            id: dotStage
+            anchors.centerIn: parent
+            width: dots.implicitWidth
+            height: dots.implicitHeight
+            scale: dots.waveScale
+            Behavior on scale {
+                NumberAnimation { duration: 90; easing.type: Easing.OutCubic }
+            }
+
+            Repeater {
+                model: 3
+
+                delegate: Rectangle {
+                    required property int index
+                    width: dots.dotRadius * 2
+                    height: width
+                    radius: width / 2
+                    color: dots.color
+                    opacity: dots.dotOpacity(index)
+                    x: dots.implicitWidth / 2 + (index - 1) * dots.dotSpacing - width / 2
+                    y: (dots.implicitHeight - height) / 2
+
+                    Behavior on opacity {
+                        NumberAnimation { duration: 90; easing.type: Easing.OutCubic }
                     }
                 }
             }

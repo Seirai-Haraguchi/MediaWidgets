@@ -36,14 +36,18 @@ class FakeMedia(QObject):
 
 
 def make_doc():
-    """两行逐字歌词：第一行带翻译，第二行无翻译。"""
+    """两行逐字歌词：第一行带翻译，第二行无翻译。
+
+    结束时间取「词级末点 / 下一行之前的真实空档」，与真实抓取结果一致
+    （行结束早于行起点会让间奏判定看到假空档）。
+    """
     return lp.LyricsDocument([
-        lp.LyricLine(1000, 3000, "晴天 周杰伦",
+        lp.LyricLine(1000, 4000, "晴天 周杰伦",
                      [lp.LyricWord(1000, 1600, "晴天"),
                       lp.LyricWord(1600, 2600, " "),
                       lp.LyricWord(2600, 3800, "周杰伦")],
                      translation="Sunny day"),
-        lp.LyricLine(5000, 3000, "词 周杰伦",
+        lp.LyricLine(5000, 8000, "词 周杰伦",
                      [lp.LyricWord(5000, 6000, "词")],
                      translation=None),
     ], "qqmusic", "晴天")
@@ -319,6 +323,130 @@ def test_instrumental_document_is_nomatch():
     check("instrumental clears line", backend.lineText == "" and backend.words == [])
 
 
+def make_interlude_doc():
+    """逐字歌词：第三行之前有 8s 长空档 → 应判为间奏。"""
+    def line(start, end, text):
+        return lp.LyricLine(start, end, text, [lp.LyricWord(start, end, text)], None)
+    return lp.LyricsDocument([
+        line(1000, 3000, "第一句"),
+        line(4000, 6000, "第二句"),
+        line(14000, 16000, "第三句"),
+    ], "qqmusic", "间奏测试")
+
+
+def test_interlude_detected_on_long_gap():
+    backend, media, _ = make_backend(fetch=lambda *a: (make_interlude_doc(), "qqmusic"))
+    backend._on_song_changed("间奏测试", "艺")
+    backend._fetch_worker(backend._gen, "间奏测试", "艺", media.duration_ms, "auto")
+    check("interlude off while lyrics playing", not backend.interlude)
+    media._pos = 5000
+    backend._on_tick()
+    check("still normal line mid-song", not backend.interlude and backend.lineText == "第二句",
+          f"{backend.interlude} {backend.lineText!r}")
+
+    # 第二句结束（6000）即进入间奏；终点 = 第三句起点 - 250ms 提前量
+    media._pos = 6000
+    backend._on_tick()
+    check("interlude starts when previous line ends", backend.interlude, str(backend.interlude))
+    check("interlude start ms", backend.interludeStartMs == 6000, backend.interludeStartMs)
+    check("interlude end ms subtracts lead-in", backend.interludeEndMs == 13750,
+          backend.interludeEndMs)
+    check("interlude clears lyrics line", backend.lineText == "" and backend.words == [],
+          f"{backend.lineText!r} {backend.words!r}")
+
+    media._pos = 10000
+    backend._on_tick()
+    check("interlude holds across mid-gap", backend.interlude and backend.lineText == "")
+
+    # 提前量窗口 [gap[1], 下一行起点)：直接预显示下一句（未填充），不回落上一句
+    media._pos = 13800
+    backend._on_tick()
+    check("lead-in window pre-shows next line",
+          not backend.interlude and backend.lineText == "第三句",
+          f"{backend.interlude} {backend.lineText!r}")
+
+    media._pos = 14100
+    backend._on_tick()
+    check("next line takes over after interlude",
+          not backend.interlude and backend.lineText == "第三句")
+
+
+def test_short_gap_is_not_interlude():
+    """空档 < 4s 属普通换行，不切呼吸点（避免逐句之间频繁闪烁）。"""
+    doc = lp.LyricsDocument([
+        lp.LyricLine(0, 2000, "甲", [lp.LyricWord(0, 2000, "甲")], None),
+        lp.LyricLine(5000, 7000, "乙", [lp.LyricWord(5000, 7000, "乙")], None),
+    ], "qqmusic", "短空档")
+    backend, media, _ = make_backend(fetch=lambda *a: (doc, "qqmusic"))
+    backend._on_song_changed("短空档", "艺")
+    backend._fetch_worker(backend._gen, "短空档", "艺", media.duration_ms, "auto")
+    media._pos = 3500  # 2000 → 4750 只有 2750ms
+    backend._on_tick()
+    check("2.75s gap is not interlude", not backend.interlude, str(backend.interlude))
+
+
+def test_intro_gap_becomes_interlude():
+    """首行开始前的长前奏同样算间奏，起点为 0。"""
+    doc = lp.LyricsDocument([
+        lp.LyricLine(12000, 14000, "第一句", [lp.LyricWord(12000, 14000, "第一句")], None),
+        lp.LyricLine(16000, 18000, "第二句", [lp.LyricWord(16000, 18000, "第二句")], None),
+    ], "qqmusic", "长前奏")
+    backend, media, _ = make_backend(fetch=lambda *a: (doc, "qqmusic"))
+    backend._on_song_changed("长前奏", "艺")
+    backend._fetch_worker(backend._gen, "长前奏", "艺", media.duration_ms, "auto")
+    media._pos = 3000
+    backend._on_tick()
+    check("intro gap becomes interlude", backend.interlude, str(backend.interlude))
+    check("intro interlude starts at 0", backend.interludeStartMs == 0,
+          backend.interludeStartMs)
+    check("intro interlude clears line", backend.lineText == "", repr(backend.lineText))
+
+    media._pos = 11900  # 提前量窗口
+    backend._on_tick()
+    check("intro lead-in pre-shows first line",
+          not backend.interlude and backend.lineText == "第一句",
+          f"{backend.interlude} {backend.lineText!r}")
+
+
+def test_line_level_lyrics_never_interlude():
+    """行级歌词以「下一行起点」为行结束 → 不存在空档，绝不误判间奏。"""
+    doc = lp.LyricsDocument([
+        lp.LyricLine(0, 5000, "第一行", [], None),
+        lp.LyricLine(5000, 12000, "第二行", [], None),
+        lp.LyricLine(12000, 20000, "第三行", [], None),
+    ], "netease", "行级")
+    backend, media, _ = make_backend(fetch=lambda *a: (doc, "netease"))
+    backend._on_song_changed("行级", "艺")
+    backend._fetch_worker(backend._gen, "行级", "艺", media.duration_ms, "auto")
+    bad = None
+    for pos in (0, 3000, 5100, 9000, 13000):
+        media._pos = pos
+        backend._on_tick()
+        if backend.interlude:
+            bad = pos
+            break
+    check("line-level lyrics never produce interlude", bad is None, f"triggered at {bad}")
+
+
+def test_song_change_and_nomatch_clear_interlude():
+    backend, media, _ = make_backend(fetch=lambda *a: (make_interlude_doc(), "qqmusic"))
+    backend._on_song_changed("间奏测试", "艺")
+    backend._fetch_worker(backend._gen, "间奏测试", "艺", media.duration_ms, "auto")
+    media._pos = 10000
+    backend._on_tick()
+    check("interlude active before song change", backend.interlude)
+    backend._on_song_changed("另一首", "艺")
+    check("interlude reset on song change",
+          not backend.interlude and backend.interludeStartMs == 0
+          and backend.interludeEndMs == 0,
+          f"{backend.interlude} {backend.interludeStartMs} {backend.interludeEndMs}")
+
+    backend2, media2, _ = make_backend(fetch=lambda *a: (None, None))
+    backend2._on_song_changed("无", "歌")
+    backend2._fetch_worker(backend2._gen, "无", "歌", media2.duration_ms, "auto")
+    check("interlude off in nomatch", not backend2.interlude and backend2.interludeEndMs == 0)
+
+
 if __name__ == "__main__":
     test_word_line_and_translation()
     test_subtitle_modes()
@@ -333,6 +461,11 @@ if __name__ == "__main__":
     test_json_roundtrip()
     test_song_cleared_to_idle()
     test_instrumental_document_is_nomatch()
+    test_interlude_detected_on_long_gap()
+    test_short_gap_is_not_interlude()
+    test_intro_gap_becomes_interlude()
+    test_line_level_lyrics_never_interlude()
+    test_song_change_and_nomatch_clear_interlude()
     print()
     if fails:
         print(f"FAILED: {fails}")

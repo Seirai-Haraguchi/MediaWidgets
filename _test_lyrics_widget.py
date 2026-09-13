@@ -172,6 +172,7 @@ class StubLyricsBackend(QObject):
     lineChanged = Signal()
     positionChanged = Signal()
     sourceNameChanged = Signal()
+    interludeChanged = Signal()
 
     def __init__(self, media, parent=None):
         super().__init__(parent)
@@ -185,6 +186,9 @@ class StubLyricsBackend(QObject):
         self._word_timing = True
         self._sub_line = "Sunny day"
         self._position_ms = 1300
+        self._interlude = False
+        self._interlude_start_ms = 0
+        self._interlude_end_ms = 0
 
     @Property(QObject, constant=True)
     def media(self):
@@ -233,6 +237,24 @@ class StubLyricsBackend(QObject):
         self._word_timing = word_timing
         self._sub_line = sub_line
         self.lineChanged.emit()
+
+    @Property(bool, notify=interludeChanged)
+    def interlude(self):
+        return self._interlude
+
+    @Property(int, notify=interludeChanged)
+    def interludeStartMs(self):
+        return self._interlude_start_ms
+
+    @Property(int, notify=interludeChanged)
+    def interludeEndMs(self):
+        return self._interlude_end_ms
+
+    def set_interlude(self, active, start_ms=0, end_ms=0):
+        self._interlude = active
+        self._interlude_start_ms = start_ms
+        self._interlude_end_ms = end_ms
+        self.interludeChanged.emit()
 
     @Property(str, notify=sourceNameChanged)
     def sourceName(self):
@@ -662,27 +684,92 @@ def main():
         return 1
     print("glow: long-note glow activates only for word-timed notes >1000ms", flush=True)
 
-    # 无可用歌词时塌缩；loading 保持占位；ready 再恢复
+    # 间奏：主行让位给三个呼吸点，两者不同时出现（避免叠字/换行跳变）
+    backend.set_line([{"text": "间奏前", "startMs": 0, "endMs": 4000}],
+                     word_timing=False, sub_line="")
+    backend.set_position(6000)
+    backend.set_interlude(True, 4000, 9750)
+    _wait(150)
+    if not root.property("interludeActive"):
+        print("FAIL: interlude should activate while a long gap is playing")
+        return 1
+    if _find_sweep().property("visible"):
+        print("FAIL: lyrics row must hide during interlude (dots take its place)")
+        return 1
+    dots_item = next((o for o in root.findChildren(QObject)
+                      if o.property("objectName") == "interludeDots"), None)
+    if dots_item is None:
+        print("FAIL: interludeDots not found by objectName")
+        return 1
+    if not dots_item.property("visible"):
+        print("FAIL: interlude dots should be visible during interlude")
+        return 1
+    # Repeater delegate 的 QObject parent 为 None，树扫描取不到：必须用 itemAt(i)
+    dot_repeater = next((c for c in dots_item.findChildren(QObject)
+                         if c.metaObject().className().startswith("QQuickRepeater")), None)
+    if dot_repeater is None or dot_repeater.property("count") != 3:
+        print(f"FAIL: expected 3 interlude dots, got "
+              f"{dot_repeater.property('count') if dot_repeater else None}")
+        return 1
+    dot_opacities = []
+    for i in range(3):
+        expr = QQmlExpression(engine.rootContext(), dot_repeater, f"itemAt({i})")
+        item, errored = expr.evaluate()
+        if errored or item is None:
+            print(f"FAIL: interlude dot itemAt({i}) errored: {expr.error()}")
+            return 1
+        dot_opacities.append(float(item.property("opacity") or 0))
+    lit = [o for o in dot_opacities if o > 0.05]
+    if not lit:
+        print(f"FAIL: interlude dots should be lit mid-gap, "
+              f"opacities={[round(o, 3) for o in dot_opacities]}")
+        return 1
+    print(f"interlude: {len(lit)}/3 dots breathing, lyrics row hidden", flush=True)
+
+    # 间奏结束 → 主行回来，点退场
+    backend.set_interlude(False)
+    _wait(150)
+    if root.property("interludeActive"):
+        print("FAIL: interlude should clear when gap ends")
+        return 1
+    if not _find_sweep().property("visible"):
+        print("FAIL: lyrics row should come back after interlude")
+        return 1
+    print("interlude: lyrics row restored after gap", flush=True)
+
+    # 无可用歌词时收起：不可见 + actualVisible 归 false，但组件本身仍留在宿主列表里
+    # （height / implicitWidth 原样保留，不再像旧实现那样把高度也绑成 0）。
+    # loading 保持占位避免闪烁；ready 再恢复显示，无需重新登记。
     backend.set_state("nomatch")
-    _wait(100)
-    hide_h = root.property("height")
-    if root.property("shouldShow") or (hide_h is not None and float(hide_h) > 0.5):
+    _wait(450)  # 等退场动画（最长 250ms）播完
+    if (root.property("shouldShow") or root.property("visible")
+            or root.property("actualVisible")):
         print(f"FAIL: nomatch should hide widget, "
-              f"shouldShow={root.property('shouldShow')} h={hide_h}")
+              f"shouldShow={root.property('shouldShow')} "
+              f"visible={root.property('visible')} "
+              f"actualVisible={root.property('actualVisible')}")
+        return 1
+    hidden_h = float(root.property("height") or 0)
+    if hidden_h < 1:
+        print(f"FAIL: hidden widget must keep its height so it stays in the host "
+              f"component list, got h={hidden_h}")
         return 1
     backend.set_state("loading")
-    _wait(100)
+    _wait(150)
     if not root.property("shouldShow"):
         print("FAIL: loading must keep widget visible to avoid flicker")
         return 1
     backend.set_state("ready")
-    _wait(100)
-    ready_h = root.property("height")
-    if not root.property("shouldShow") or ready_h is None or float(ready_h) < 1:
+    _wait(500)  # 等入场动画把组件重新显示出来
+    if (not root.property("shouldShow") or not root.property("visible")
+            or not root.property("actualVisible")):
         print(f"FAIL: ready should restore widget, "
-              f"shouldShow={root.property('shouldShow')} h={ready_h}")
+              f"shouldShow={root.property('shouldShow')} "
+              f"visible={root.property('visible')} "
+              f"actualVisible={root.property('actualVisible')}")
         return 1
-    print("visibility: hide on nomatch, keep during loading, restore on ready", flush=True)
+    print("visibility: nomatch hides (stays in list), loading holds, ready restores",
+          flush=True)
 
     # 字体设置：原文/译文分别生效；译文回退到下一句时仍用原文字体
     configs.set_pref("lyric_font_original", "Consolas")

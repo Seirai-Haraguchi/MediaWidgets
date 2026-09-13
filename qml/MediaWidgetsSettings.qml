@@ -28,6 +28,34 @@ FluentPage {
         return v === undefined ? fallback : v
     }
 
+    // ---- 歌词字体设置用到的共享数据 ----
+    // 三张字体设置卡（原文 / 译文 / 罗马音）共用同一份字体与字重列表，
+    // 避免每张卡各存一份、也保证「跟随全局」永远是第 0 项。
+    readonly property var lyricFontFamilies: {
+        var families = Qt.fontFamilies().slice().sort()
+        families.unshift(qsTr("跟随全局字体"))
+        return families
+    }
+    readonly property var lyricFontWeights: [
+        qsTr("跟随全局"), "Thin", "Extra Light", "Light", "Regular",
+        "Medium", "Semi Bold", "Bold", "Extra Bold", "Black"
+    ]
+
+    function fontFamilyIndex(saved) {
+        if (!saved || saved === "" || saved === "Follow global font"
+                || saved === qsTr("跟随全局字体"))
+            return 0
+        var i = root.lyricFontFamilies.indexOf(saved)
+        return i >= 0 ? i : 0
+    }
+
+    function fontWeightIndex(saved) {
+        var n = Number(saved)
+        if (!n || n <= 0)
+            return 0
+        return Math.max(0, Math.min(9, Math.round(n / 100)))
+    }
+
     // ---------- 正在播放 ----------
 
     Text {
@@ -427,7 +455,7 @@ FluentPage {
 
             SettingCard {
                 Layout.fillWidth: true
-                icon.name: "ic_fluent_translate_20_regular"
+                icon.name: "ic_fluent_text_description_20_regular"
                 title: qsTr("副行内容")
                 description: qsTr("选择歌词组件原文旁显示的内容")
 
@@ -462,60 +490,53 @@ FluentPage {
                 }
             }
 
-            // 歌词字体：RinUI SettingExpander + SettingItem，与 CW2 全局字体设置同构
-            SettingExpander {
-                id: lyricFontExpander
+            // 歌词字体：每一类歌词各用一张标准 RinUI 设置卡
+            // （标题 + 说明 + 字体/字重选择器），与本页其它设置卡结构一致。
+            // 早前用 SettingExpander + SettingItem，宿主里只看得见两个下拉框、
+            // 条目标题与说明被挤没了，故改为平铺设置卡。
+            SettingCard {
+                objectName: "lyricFontOriginalCard"
                 Layout.fillWidth: true
-                icon.name: "ic_fluent_text_font_20_regular"
-                title: qsTr("歌词字体")
-                description: qsTr("分别为原文、译文与罗马音歌词设置字体和字重。留空或选择「跟随全局字体」时，使用全局字体设置中的主界面字体。")
+                icon.name: "ic_fluent_text_align_left_20_regular"
+                title: qsTr("原文歌词字体")
+                description: qsTr("显示原文歌词时使用的字体和字重。选择「跟随全局字体」时，使用全局字体设置中的主界面字体。")
 
-                readonly property var fontFamilies: {
-                    var families = Qt.fontFamilies().slice().sort()
-                    families.unshift(qsTr("跟随全局字体"))
-                    return families
-                }
+                ColumnLayout {
+                    spacing: 2
 
-                function fontIndex(saved) {
-                    if (!saved || saved === "" || saved === "Follow global font"
-                            || saved === qsTr("跟随全局字体"))
-                        return 0
-                    var i = fontFamilies.indexOf(saved)
-                    return i >= 0 ? i : 0
-                }
-
-                function weightIndex(saved) {
-                    var n = Number(saved)
-                    if (!n || n <= 0)
-                        return 0
-                    return Math.max(0, Math.min(9, Math.round(n / 100)))
-                }
-
-                SettingItem {
-                    title: qsTr("原文")
-                    description: qsTr("显示原文歌词时使用的字体和字重。")
+                    Text {
+                        text: qsTr("字体")
+                        typography: Typography.Caption
+                        color: Colors.proxy.textSecondaryColor
+                    }
 
                     ComboBox {
                         id: originalFontCombo
                         Layout.preferredWidth: 168
-                        model: lyricFontExpander.fontFamilies
-                        currentIndex: lyricFontExpander.fontIndex(
+                        model: root.lyricFontFamilies
+                        currentIndex: root.fontFamilyIndex(
                             root.config("lyric_font_original", ""))
                         onActivated: (index) => {
                             Configs.setPlugin(root.pluginId, "lyric_font_original",
                                               index <= 0 ? "" : originalFontCombo.model[index])
                         }
                     }
+                }
+
+                ColumnLayout {
+                    spacing: 2
+
+                    Text {
+                        text: qsTr("字重")
+                        typography: Typography.Caption
+                        color: Colors.proxy.textSecondaryColor
+                    }
 
                     ComboBox {
                         id: originalWeightCombo
                         Layout.preferredWidth: 120
-                        model: [
-                            qsTr("跟随全局"), "Thin", "Extra Light", "Light",
-                            "Regular", "Medium", "Semi Bold", "Bold",
-                            "Extra Bold", "Black"
-                        ]
-                        currentIndex: lyricFontExpander.weightIndex(
+                        model: root.lyricFontWeights
+                        currentIndex: root.fontWeightIndex(
                             root.config("lyric_font_weight_original", 0))
                         onActivated: (index) => {
                             Configs.setPlugin(root.pluginId, "lyric_font_weight_original",
@@ -523,32 +544,51 @@ FluentPage {
                         }
                     }
                 }
+            }
 
-                SettingItem {
-                    title: qsTr("译文")
-                    description: qsTr("显示译文歌词时使用的字体和字重。若该行无译文而回退到原文，仍按原文设置渲染。")
+            SettingCard {
+                objectName: "lyricFontTranslationCard"
+                Layout.fillWidth: true
+                icon.name: "ic_fluent_translate_20_regular"
+                title: qsTr("译文歌词字体")
+                description: qsTr("显示译文歌词时使用的字体和字重。该行没有译文而回退显示原文时，仍按原文歌词的字体设置渲染。")
+
+                ColumnLayout {
+                    spacing: 2
+
+                    Text {
+                        text: qsTr("字体")
+                        typography: Typography.Caption
+                        color: Colors.proxy.textSecondaryColor
+                    }
 
                     ComboBox {
                         id: translationFontCombo
                         Layout.preferredWidth: 168
-                        model: lyricFontExpander.fontFamilies
-                        currentIndex: lyricFontExpander.fontIndex(
+                        model: root.lyricFontFamilies
+                        currentIndex: root.fontFamilyIndex(
                             root.config("lyric_font_translation", ""))
                         onActivated: (index) => {
                             Configs.setPlugin(root.pluginId, "lyric_font_translation",
                                               index <= 0 ? "" : translationFontCombo.model[index])
                         }
                     }
+                }
+
+                ColumnLayout {
+                    spacing: 2
+
+                    Text {
+                        text: qsTr("字重")
+                        typography: Typography.Caption
+                        color: Colors.proxy.textSecondaryColor
+                    }
 
                     ComboBox {
                         id: translationWeightCombo
                         Layout.preferredWidth: 120
-                        model: [
-                            qsTr("跟随全局"), "Thin", "Extra Light", "Light",
-                            "Regular", "Medium", "Semi Bold", "Bold",
-                            "Extra Bold", "Black"
-                        ]
-                        currentIndex: lyricFontExpander.weightIndex(
+                        model: root.lyricFontWeights
+                        currentIndex: root.fontWeightIndex(
                             root.config("lyric_font_weight_translation", 0))
                         onActivated: (index) => {
                             Configs.setPlugin(root.pluginId, "lyric_font_weight_translation",
@@ -556,32 +596,51 @@ FluentPage {
                         }
                     }
                 }
+            }
 
-                SettingItem {
-                    title: qsTr("罗马音")
-                    description: qsTr("显示罗马音歌词时使用的字体和字重。")
+            SettingCard {
+                objectName: "lyricFontRomanizedCard"
+                Layout.fillWidth: true
+                icon.name: "ic_fluent_subtitles_20_regular"
+                title: qsTr("罗马音歌词字体")
+                description: qsTr("显示罗马音歌词时使用的字体和字重。选择「跟随全局字体」时，使用全局字体设置中的主界面字体。")
+
+                ColumnLayout {
+                    spacing: 2
+
+                    Text {
+                        text: qsTr("字体")
+                        typography: Typography.Caption
+                        color: Colors.proxy.textSecondaryColor
+                    }
 
                     ComboBox {
                         id: romanizedFontCombo
                         Layout.preferredWidth: 168
-                        model: lyricFontExpander.fontFamilies
-                        currentIndex: lyricFontExpander.fontIndex(
+                        model: root.lyricFontFamilies
+                        currentIndex: root.fontFamilyIndex(
                             root.config("lyric_font_romanized", ""))
                         onActivated: (index) => {
                             Configs.setPlugin(root.pluginId, "lyric_font_romanized",
                                               index <= 0 ? "" : romanizedFontCombo.model[index])
                         }
                     }
+                }
+
+                ColumnLayout {
+                    spacing: 2
+
+                    Text {
+                        text: qsTr("字重")
+                        typography: Typography.Caption
+                        color: Colors.proxy.textSecondaryColor
+                    }
 
                     ComboBox {
                         id: romanizedWeightCombo
                         Layout.preferredWidth: 120
-                        model: [
-                            qsTr("跟随全局"), "Thin", "Extra Light", "Light",
-                            "Regular", "Medium", "Semi Bold", "Bold",
-                            "Extra Bold", "Black"
-                        ]
-                        currentIndex: lyricFontExpander.weightIndex(
+                        model: root.lyricFontWeights
+                        currentIndex: root.fontWeightIndex(
                             root.config("lyric_font_weight_romanized", 0))
                         onActivated: (index) => {
                             Configs.setPlugin(root.pluginId, "lyric_font_weight_romanized",

@@ -245,6 +245,70 @@ def main():
         return 1
     print("widget customization: lyric tab shown with adaptive height", flush=True)
 
+    # 歌词字体：三类歌词各一张标准 RinUI 设置卡（标题 + 说明 + 字体/字重选择器）。
+    # 早期版本用 SettingExpander + SettingItem，宿主里只看得见下拉框、条目标题与说明
+    # 被挤没了；这里是「每个选择器都有对应标题与说明」的回归守卫。
+    font_cards = [
+        ("lyricFontOriginalCard", "原文歌词字体", 7),
+        ("lyricFontTranslationCard", "译文歌词字体", 7),
+        ("lyricFontRomanizedCard", "罗马音歌词字体", 6),
+    ]
+    font_selectors = {}
+    for name, title, probe_weight in font_cards:
+        card = find_object(name)
+        if card is None:
+            print(f"FAIL: font settings card {name} missing", flush=True)
+            return 1
+        if card.property("title") != title:
+            print(f"FAIL: {name} title={card.property('title')!r} expect {title!r}",
+                  flush=True)
+            return 1
+        desc = card.property("description") or ""
+        if len(desc) < 8:
+            print(f"FAIL: {name} needs its own description, got {desc!r}", flush=True)
+            return 1
+        combos = [c for c in card.findChildren(QObject)
+                  if "ComboBox" in c.metaObject().className()]
+        if len(combos) != 2:
+            print(f"FAIL: {name} should host a font + a weight selector, "
+                  f"got {len(combos)}", flush=True)
+            return 1
+        weights = [c for c in combos if c.property("count") == 10]
+        fonts = [c for c in combos if c.property("count") != 10]
+        if len(weights) != 1 or len(fonts) != 1 or fonts[0].property("count") < 2:
+            print(f"FAIL: {name} selectors wrong: "
+                  f"counts={[c.property('count') for c in combos]}", flush=True)
+            return 1
+        font_selectors[name] = (fonts[0], weights[0], probe_weight)
+    print("font settings: 3 SettingCards, each with title/description/2 selectors",
+          flush=True)
+
+    # 字体/字重选择器读的是同一份共享列表与同一批插件配置键
+    for name, (font_combo, weight_combo, probe) in font_selectors.items():
+        if weight_combo.property("currentIndex") != 0:
+            print(f"FAIL: {name} weight should default to 跟随全局, "
+                  f"got {weight_combo.property('currentIndex')}", flush=True)
+            return 1
+    # 字重写入：激活「Bold」(index 7) → 700（QML 信号从 Python 侧发射）
+    from PySide6.QtCore import Q_ARG, QMetaObject, Qt
+
+    romanized_weight = font_selectors["lyricFontRomanizedCard"][1]
+    QMetaObject.invokeMethod(romanized_weight, "activated",
+                             Qt.ConnectionType.DirectConnection, Q_ARG("int", 7))
+    if configs.written.get("lyric_font_weight_romanized") != 700:
+        print(f"FAIL: weight selector did not persist, written={configs.written}",
+              flush=True)
+        return 1
+    # 字体写入：激活第 1 项（首项是「跟随全局字体」）→ 应写成具体字体名
+    romanized_font = font_selectors["lyricFontRomanizedCard"][0]
+    QMetaObject.invokeMethod(romanized_font, "activated",
+                             Qt.ConnectionType.DirectConnection, Q_ARG("int", 1))
+    expected_family = romanized_font.property("model")[1]
+    if configs.written.get("lyric_font_romanized") != expected_family:
+        print(f"FAIL: font selector did not persist, written={configs.written}", flush=True)
+        return 1
+    print("font settings: selectors persist to the plugin config", flush=True)
+
     # 图标名必须存在于 RinUI 字体图标索引（缺失即页面“缺图标”）
     icon_names = [
         "ic_fluent_music_note_2_20_regular",
@@ -260,7 +324,8 @@ def main():
         "ic_fluent_text_description_20_regular",
         "ic_fluent_cloud_arrow_down_20_regular",
         "ic_fluent_translate_20_regular",
-        "ic_fluent_text_font_20_regular",
+        "ic_fluent_text_align_left_20_regular",
+        "ic_fluent_subtitles_20_regular",
     ]
     index_js = (
         RINUI_QML_DIR / "RinUI" / "assets" / "fonts" / "FluentSystemIcons-Index.js"

@@ -10,6 +10,10 @@ lyrics_backend.py
 - 行级歌词（网易云 LRC）输出整行单 word + wordTiming=false，
   QML 只显示当前行（不套逐字填充效果）；
 - 副行规则：当前行有翻译且开启翻译 → 显示翻译；否则显示下一行歌词预览；
+- 间奏规则（参考 MediaIsland 的 LyricsInterludeDetector）：相邻两行之间（含开头前奏）
+  若存在 ≥4s 且未被下一句 250ms 提前量吃掉的空档，则判为间奏——期间不输出任何歌词行，
+  只把间奏区间交给 QML 渲染呼吸点；间奏末尾 250ms 改为直接预显示下一句，
+  避免选择器先把上一句重新亮一遍造成闪烁；
 - 歌词源可在设置页切换（auto/QQ/酷狗/网易云），切换后对当前歌曲立即重抓。
 
 线程模型：换歌信号（主线程）→ 防抖合并 → 工作线程搜索抓取 → 排队信号回主线程
@@ -33,6 +37,8 @@ import lyrics_providers
 _TICK_MS = 100        # 进度节拍：驱动逐字填充动画
 _DEBOUNCE_MS = 800    # 换歌防抖：SMTC 标题/艺人常分字段先后到达
 _CACHE_MAX = 300      # 磁盘缓存条目上限（超出按最旧淘汰）
+_INTERLUDE_MIN_MS = 4000     # 间奏最短时长：短于它的行间空档不算间奏
+_INTERLUDE_END_LEAD_MS = 250  # 间奏末尾提前量：留给下一句歌词预显示
 
 
 def _default_cache_dir():
@@ -86,6 +92,7 @@ class LyricsBackend(QObject):
     lineChanged = Signal()       # lineText / words / subLine / subIsTranslation 一起换
     positionChanged = Signal()
     sourceNameChanged = Signal()
+    interludeChanged = Signal()  # 是否间奏 + 间奏区间（起点/终点）
 
     def __init__(self, media_backend, config_getter=None, cache_dir=None,
                  fetch_func=None, parent=None):
@@ -112,6 +119,11 @@ class LyricsBackend(QObject):
         self._line_text = ""
         self._sub_line = ""
         self._sub_is_translation = False
+
+        # 间奏：_interlude_active 表示当前正处在间奏中（此时不输出任何歌词行）
+        self._interlude_active = False
+        self._interlude_start_ms = 0
+        self._interlude_end_ms = 0
 
         self._debounce_timer = QTimer(self)
         self._debounce_timer.setSingleShot(True)
@@ -177,6 +189,21 @@ class LyricsBackend(QObject):
     def positionMs(self):
         return self._position_ms
 
+    @Property(bool, notify=interludeChanged)
+    def interlude(self):
+        """当前是否处于间奏（无活跃歌词的长空档）；QML 据此换成呼吸点显示。"""
+        return self._interlude_active
+
+    @Property(int, notify=interludeChanged)
+    def interludeStartMs(self):
+        """当前间奏的起点（毫秒）；非间奏时为 0。"""
+        return self._interlude_start_ms
+
+    @Property(int, notify=interludeChanged)
+    def interludeEndMs(self):
+        """当前间奏的终点（毫秒，已含下一句的提前量）；非间奏时为 0。"""
+        return self._interlude_end_ms
+
     @Property(str, notify=sourceNameChanged)
     def sourceName(self):
         return self._source_name
@@ -225,6 +252,7 @@ class LyricsBackend(QObject):
         self._title = title or ""
         self._artist = artist or ""
         self._set_state("idle")
+        self._hide_interlude()
         self._clear_line()
         if not self._title:
             return
@@ -279,6 +307,7 @@ class LyricsBackend(QObject):
             self._source_name = ""
             self.sourceNameChanged.emit()
             self._set_state("error" if error else "nomatch")
+            self._hide_interlude()
             self._clear_line()
             return
         self._doc = doc
@@ -323,16 +352,70 @@ class LyricsBackend(QObject):
             self._debounce_timer.start()
 
     def _sync_line(self, force=False):
+        if not self._lines:
+            self._hide_interlude()
+            self._clear_line()
+            return
         idx = self._index_at(self._position_ms)
-        if idx < 0 and self._lines:
+        gap = self._interlude_gap(idx)
+
+        # 间奏中：清空歌词行，只把间奏区间交给 QML 画呼吸点
+        if gap is not None and gap[0] <= self._position_ms < gap[1]:
+            self._show_interlude(gap)
+            return
+        self._hide_interlude()
+
+        if gap is not None and self._position_ms >= gap[1]:
+            # 间奏末尾的提前量窗口（gap[1] = 下一行起点 - 250ms）：直接预显示下一句，
+            # 否则这一小段会先回落上一句，间奏收尾出现可见闪烁。
+            # 此处 idx 必然仍是上一行（gap 由 _index_at 结果推出，pos < 下一行起点），
+            # 所以 +1 恰好是下一行，不会跨行。
+            idx += 1
+        elif gap is None and idx < 0:
             idx = 0  # 前奏：显示第一行未填充预览（fillRatio=0），唱到自然开始扫描
+
         if not force and idx == self._index:
             return
         self._index = idx
-        if idx < 0:
-            self._clear_line()
-            return
         self._apply_line(idx)
+
+    def _interlude_gap(self, idx):
+        """idx 行之后那一处空档若够长则返回 (start_ms, end_ms)，否则 None。
+
+        起点取上一行的结束（前奏取 0），终点取下一行起点减掉提前量；
+        不足 _INTERLUDE_MIN_MS 的空档不算间奏，按普通换行处理。
+        与 MediaIsland 一致：只有相邻两行自带真实结束时间（逐字歌词 / 带结束时间的
+        LRC）才可能出现空档；行级歌词把「下一行起点」当作行结束，因此不会误判间奏。
+        """
+        nxt = idx + 1
+        if nxt >= len(self._lines):
+            return None
+        start = self._lines[idx].end_ms if idx >= 0 else 0
+        end = max(start, self._lines[nxt].start_ms - _INTERLUDE_END_LEAD_MS)
+        if end - start < _INTERLUDE_MIN_MS:
+            return None
+        return start, end
+
+    def _show_interlude(self, gap):
+        start, end = gap
+        if (start, end) != (self._interlude_start_ms, self._interlude_end_ms):
+            self._interlude_start_ms = start
+            self._interlude_end_ms = end
+            self.interludeChanged.emit()
+        if self._interlude_active:
+            return
+        self._interlude_active = True
+        self._index = -1
+        self._clear_line()
+
+    def _hide_interlude(self):
+        if (not self._interlude_active
+                and not self._interlude_start_ms and not self._interlude_end_ms):
+            return
+        self._interlude_active = False
+        self._interlude_start_ms = 0
+        self._interlude_end_ms = 0
+        self.interludeChanged.emit()
 
     def _index_at(self, pos_ms):
         """二分：最后一个 start_ms <= pos 的行号；都在 pos 之前返回 -1。"""
