@@ -788,6 +788,103 @@ def main():
         return 1
     print("fonts: original/translation settings apply live", flush=True)
 
+    # ---- 真后端 × 真组件：间奏信号的时序契约 ----
+    # 上面的间奏断言都走桩后端（set_interlude 先置位再 emit），因此掩盖了真后端
+    # _show_interlude() 里「先 emit 再置位」的顺序错误：QML 绑定在 emit 的同一时刻
+    # 求值，只会读到旧的 False，而此后整个间奏期间不再有第二次 emit →
+    # root.interludeActive 恒为 false，三点呼吸点在真机上永不显示。
+    # 真后端 + 真组件走一遍才能钉住这条契约，别退化回桩后端。
+    sys.path.insert(0, str(PLUGIN_DIR))
+    import lyrics_providers as lp
+    from lyrics_backend import LyricsBackend
+
+    class InterludeMedia(StubMedia):
+        songChanged = Signal(str, str)
+
+        def __init__(self):
+            super().__init__()
+            self.duration_ms = 200000
+            self._pos = 0
+
+        def current_position_ms(self):
+            return self._pos
+
+    def _gap_line(start, end, text):
+        return lp.LyricLine(start, end, text, [lp.LyricWord(start, end, text)], None)
+
+    gap_doc = lp.LyricsDocument([
+        _gap_line(1000, 3000, "第一句"),
+        _gap_line(4000, 6000, "第二句"),
+        _gap_line(14000, 16000, "第三句"),
+    ], "qqmusic", "间奏测试")
+
+    gap_media = InterludeMedia()
+    real_backend = LyricsBackend(
+        gap_media, lambda key: None,
+        cache_dir=Path(tempfile.mkdtemp(dir=STUB_TMP_DIR)),
+        fetch_func=lambda *a: (gap_doc, "qqmusic"))
+    real_backend._on_song_changed("间奏测试", "艺")
+    real_backend._fetch_worker(real_backend._gen, "间奏测试", "艺",
+                               gap_media.duration_ms, "auto")
+    root.setProperty("backend", real_backend)
+    _wait(80)
+
+    gap_media._pos = 5000        # 第二句唱中：不是间奏
+    real_backend._on_tick()
+    _wait(80)
+    if root.property("interludeActive"):
+        print("FAIL: real backend must not report interlude while a line is sung")
+        return 1
+
+    gap_media._pos = 6000        # 落进 [6000, 13750) 间奏区间
+    real_backend._on_tick()
+    _wait(80)
+    if not root.property("interludeActive"):
+        print("FAIL: interlude never reached the QML binding through the real backend "
+              "(interludeChanged emitted before the state was flipped?)")
+        return 1
+    real_dots = next((o for o in root.findChildren(QObject)
+                      if o.property("objectName") == "interludeDots"), None)
+    if real_dots is None or not real_dots.property("visible"):
+        print("FAIL: interlude dots stay hidden with the real backend in interlude")
+        return 1
+    real_sweep = _find_sweep()
+    if real_sweep is not None and real_sweep.property("visible"):
+        print("FAIL: lyrics row must give way to dots during a real-backend interlude")
+        return 1
+
+    # 间奏中段：呼吸点必须真的点亮（位置/区间都由真后端提供，而非桩常量）
+    gap_media._pos = 9000
+    real_backend._on_tick()
+    _wait(150)
+    real_dot_repeater = next((c for c in real_dots.findChildren(QObject)
+                              if c.metaObject().className().startswith("QQuickRepeater")), None)
+    if real_dot_repeater is None or real_dot_repeater.property("count") != 3:
+        print("FAIL: real-backend interlude should own exactly 3 dots")
+        return 1
+    real_opacities = []
+    for i in range(3):
+        expr = QQmlExpression(engine.rootContext(), real_dot_repeater, f"itemAt({i})")
+        item, errored = expr.evaluate()
+        if errored or item is None:
+            print(f"FAIL: real-backend dot itemAt({i}) errored: {expr.error()}")
+            return 1
+        real_opacities.append(float(item.property("opacity") or 0))
+    if not [o for o in real_opacities if o > 0.05]:
+        print(f"FAIL: real-backend dots never light up, "
+              f"opacities={[round(o, 3) for o in real_opacities]}")
+        return 1
+    print(f"interlude: real backend drives {len([o for o in real_opacities if o > 0.05])}/3 "
+          f"breathing dots through QML bindings", flush=True)
+
+    gap_media._pos = 13800       # 提前量窗口：交回下一句预览，间奏关闭
+    real_backend._on_tick()
+    _wait(80)
+    if root.property("interludeActive"):
+        print("FAIL: interlude should clear when the real gap ends")
+        return 1
+    print("interlude: real backend releases dots back to the next line", flush=True)
+
     print("PASS: lyrics widget loaded and renders word delegates")
     return 0
 

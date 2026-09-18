@@ -371,6 +371,38 @@ def test_interlude_detected_on_long_gap():
           not backend.interlude and backend.lineText == "第三句")
 
 
+def test_interlude_signal_payload_is_up_to_date():
+    """interludeChanged 发出时，interlude 必须已经是新值。
+
+    QML 绑定是信号直连、在 emit 的同一时刻求值；若先 emit 再置位，订阅者只会读到
+    旧的 False，且此后整个间奏期间不再有第二次 emit —— 三点呼吸点在真机上就永不显示
+    （桩后端先置位再 emit，掩盖过这个 bug）。这里直接在 emit 的瞬间读属性来钉住契约。
+    """
+    backend, media, _ = make_backend(fetch=lambda *a: (make_interlude_doc(), "qqmusic"))
+    backend._on_song_changed("间奏测试", "艺")
+    backend._fetch_worker(backend._gen, "间奏测试", "艺", media.duration_ms, "auto")
+
+    seen = []
+    backend.interludeChanged.connect(lambda: seen.append(
+        (backend.interlude, backend.interludeStartMs, backend.interludeEndMs)))
+
+    media._pos = 6000      # 进入间奏
+    backend._on_tick()
+    check("interludeChanged carries the new active state",
+          seen and seen[-1][0] is True, str(seen))
+    check("interludeChanged carries the new gap range",
+          seen and seen[-1][1] == 6000 and seen[-1][2] == 13750, str(seen))
+
+    media._pos = 10000     # 间奏中段：不应再重复 emit（区间没变）
+    backend._on_tick()
+    check("interlude holds without redundant emits", len(seen) == 1, str(seen))
+
+    media._pos = 13800     # 离开间奏
+    backend._on_tick()
+    check("leaving interlude emits the cleared state",
+          len(seen) == 2 and seen[-1] == (False, 0, 0), str(seen))
+
+
 def test_short_gap_is_not_interlude():
     """空档 < 4s 属普通换行，不切呼吸点（避免逐句之间频繁闪烁）。"""
     doc = lp.LyricsDocument([
@@ -462,6 +494,7 @@ if __name__ == "__main__":
     test_song_cleared_to_idle()
     test_instrumental_document_is_nomatch()
     test_interlude_detected_on_long_gap()
+    test_interlude_signal_payload_is_up_to_date()
     test_short_gap_is_not_interlude()
     test_intro_gap_becomes_interlude()
     test_line_level_lyrics_never_interlude()

@@ -397,16 +397,26 @@ class LyricsBackend(QObject):
         return start, end
 
     def _show_interlude(self, gap):
+        """进入/持有间奏区间。
+
+        赋值顺序有硬性要求：必须**先**把 _interlude_active / 区间写好，**最后**才
+        emit interludeChanged。QML 绑定是信号直连，在 emit 的同一时刻求值——旧实现
+        先 emit 再置位，订阅者只会读到 False，而此后整个间奏期间再没有第二次 emit，
+        「进入间奏」这次跳变就永久丢失，三点呼吸点在真机上永不出现（v1.13 实测）。
+        桩后端因为先置位再 emit，把它掩盖了很久。
+        """
         start, end = gap
-        if (start, end) != (self._interlude_start_ms, self._interlude_end_ms):
-            self._interlude_start_ms = start
-            self._interlude_end_ms = end
+        entered = not self._interlude_active
+        moved = (start, end) != (self._interlude_start_ms, self._interlude_end_ms)
+        if entered:
+            self._interlude_active = True
+            self._index = -1   # 间奏期间不持有任何歌词行
+        self._interlude_start_ms = start
+        self._interlude_end_ms = end
+        if entered:
+            self._clear_line()
+        if entered or moved:
             self.interludeChanged.emit()
-        if self._interlude_active:
-            return
-        self._interlude_active = True
-        self._index = -1
-        self._clear_line()
 
     def _hide_interlude(self):
         if (not self._interlude_active
