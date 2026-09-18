@@ -885,6 +885,49 @@ def main():
         return 1
     print("furigana: kana rendered above kanji, gated by setting, japanese font scoped",
           flush=True)
+
+    # ---- 整行统一预留：同行每个 delegate 的 rubyHeight 必须相同 ----
+    # 曾经的实现是「按词各自预留」（rubyHeight = 该词 rubyText 的隐式高度），
+    # 于是同一行里有注音的词被推低 12px、没注音的词留在原位，主字高低错落；
+    # 且整行高度随注音出现而变，verticalCenter 会把整行连同副行一起挪位。
+    # 现在改成行级统一预留（sweep.lineReservedRuby），下面钉死这条不变量。
+    backend.set_line(
+        [{"text": "涙", "startMs": 0, "endMs": 500, "ruby": "なみだ"},
+         {"text": "の", "startMs": 500, "endMs": 800, "ruby": ""},
+         {"text": "雨", "startMs": 800, "endMs": 1400, "ruby": "あめ"}],
+        True, "", japanese=True)
+    _wait(150)
+    row = _find_wordrow()
+    rep_list = [o for o in row.findChildren(QObject)
+                if o.metaObject().className().startswith("QQuickRepeater")]
+    rep = rep_list[0]
+    heights = []
+    for i in range(3):
+        d, _ = QQmlExpression(engine.rootContext(), rep, f"itemAt({i})").evaluate()
+        if d is None:
+            print(f"FAIL: itemAt({i}) None in uniform-ruby assertion")
+            return 1
+        h, _ = QQmlExpression(engine.rootContext(), d, "rubyHeight").evaluate()
+        heights.append(h)
+    if len(set(round(float(h), 3) for h in heights)) != 1:
+        print(f"FAIL: 同一行 rubyHeight 必须整行统一，got {heights}"
+              f"（逐词预留会让无注音的词留在原位、有注音的词被推低）")
+        return 1
+    if abs(float(heights[0])) < 0.01:
+        print("FAIL: 该行有注音数据，rubyHeight 不应为 0")
+        return 1
+    # 关掉总开关后整行预留必须归零
+    configs.set_pref("lyric_furigana_enabled", False)
+    _wait(150)
+    d1, _ = QQmlExpression(engine.rootContext(), rep, "itemAt(1)").evaluate()
+    h_off, _ = QQmlExpression(engine.rootContext(), d1, "rubyHeight").evaluate()
+    if h_off is None or abs(float(h_off)) > 0.01:
+        print(f"FAIL: 关闭振假名后整行预留应归零，got {h_off}")
+        return 1
+    configs.set_pref("lyric_furigana_enabled", True)
+    _wait(150)
+    print("furigana: 整行统一预留（同行所有词共底，开关关闭时归零）", flush=True)
+
     configs.set_pref("lyric_font_japanese", "")
     configs.set_pref("lyric_font_weight_japanese", 0)
     backend.set_line(

@@ -374,6 +374,20 @@ Widget {
         // 振假名字号：主字号的 0.42 倍，夹在 [8, 18] 内，避免过大压住主行
         readonly property int rubyPixelSize: Math.max(8, Math.min(18, Math.round(pixelSize * 0.42)))
 
+        // 整行统一预留的注音高度：只要本行任意一词带注音就预留 rubyPixelSize，
+        // 所有词一律加上同样的预留量。切勿改成「按词各自预留」——那样有注音的词
+        // 会被推低、无注音的词留在原位，同一行主字出现高低错落（已踩过）。
+        readonly property real lineReservedRuby: {
+            if (!furiganaEnabled || !words)
+                return 0
+            for (var i = 0; i < words.length; ++i) {
+                var w = words[i]
+                if (w && w.ruby && ("" + w.ruby) !== "")
+                    return rubyPixelSize
+            }
+            return 0
+        }
+
         // 日语行：整行（含假名与汉字）走日语字体；其余行维持原文字体
         readonly property string effectiveFontFamily: {
             if (lineIsJapanese && japaneseFontFamily !== "")
@@ -506,8 +520,9 @@ Widget {
                     id: wordItem
                     required property var modelData
                     required property int index
-                    // 振假名基线：汉字上方小字占位高度（无假名时为 0，行高与主字号一致）
-                    readonly property real rubyHeight: rubyText.visible ? rubyText.implicitHeight : 0
+                    // 注音预留：整行统一（见 sweep.lineReservedRuby），保证同行的词
+                    // 主字共底、不出现高低错落；无注音的行该值为 0，行高与主字号一致
+                    readonly property real rubyHeight: sweep.lineReservedRuby
                     implicitWidth: baseText.width
                     implicitHeight: rubyHeight + baseText.height
 
@@ -596,7 +611,8 @@ Widget {
                     }
 
                     // 振假名（ruby）：汉字上方小字，水平居中对齐该词；
-                    // 与主字同色同填充进度，随卡拉OK 一起点亮，避免假名滞后/超前
+                    // 与主字同色同填充进度，随卡拉OK 一起点亮，避免假名滞后/超前。
+                    // 锚在整行统一的预留带底部，因此同行所有注音同一基线。
                     Text {
                         id: rubyText
                         objectName: "rubyText"
