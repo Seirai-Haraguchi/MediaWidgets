@@ -490,6 +490,21 @@ FluentPage {
                 }
             }
 
+            // 振假名：仅 QQ 音乐（QRC）的日语歌词带平假名注音，其余歌词源无此数据
+            SettingCard {
+                objectName: "lyricFuriganaCard"
+                Layout.fillWidth: true
+                icon.name: "ic_fluent_text_font_20_regular"
+                title: qsTr("日语歌词振假名")
+                description: qsTr("在日语歌词的汉字上方显示平假名注音。仅在歌词源提供注音数据（QQ 音乐）时可见。")
+
+                Switch {
+                    checked: root.config("lyric_furigana_enabled", true)
+                    onToggled: Configs.setPlugin(root.pluginId,
+                                                  "lyric_furigana_enabled", checked)
+                }
+            }
+
             // 歌词字体：每一类歌词各用一张标准 RinUI 设置卡
             // （标题 + 说明 + 字体/字重选择器），与本页其它设置卡结构一致。
             // 早前用 SettingExpander + SettingItem，宿主里只看得见两个下拉框、
@@ -644,6 +659,58 @@ FluentPage {
                             root.config("lyric_font_weight_romanized", 0))
                         onActivated: (index) => {
                             Configs.setPlugin(root.pluginId, "lyric_font_weight_romanized",
+                                              index <= 0 ? 0 : index * 100)
+                        }
+                    }
+                }
+            }
+
+            SettingCard {
+                objectName: "lyricFontJapaneseCard"
+                Layout.fillWidth: true
+                icon.name: "ic_fluent_local_language_20_regular"
+                title: qsTr("日语歌词字体")
+                description: qsTr("显示日语歌词（含假名注音）时使用的字体和字重，仅对含假名的歌词行生效。选择「跟随全局字体」时，使用全局字体设置中的主界面字体。")
+
+                ColumnLayout {
+                    spacing: 2
+
+                    Text {
+                        text: qsTr("字体")
+                        typography: Typography.Caption
+                        color: Colors.proxy.textSecondaryColor
+                    }
+
+                    ComboBox {
+                        id: japaneseFontCombo
+                        Layout.preferredWidth: 168
+                        model: root.lyricFontFamilies
+                        currentIndex: root.fontFamilyIndex(
+                            root.config("lyric_font_japanese", ""))
+                        onActivated: (index) => {
+                            Configs.setPlugin(root.pluginId, "lyric_font_japanese",
+                                              index <= 0 ? "" : japaneseFontCombo.model[index])
+                        }
+                    }
+                }
+
+                ColumnLayout {
+                    spacing: 2
+
+                    Text {
+                        text: qsTr("字重")
+                        typography: Typography.Caption
+                        color: Colors.proxy.textSecondaryColor
+                    }
+
+                    ComboBox {
+                        id: japaneseWeightCombo
+                        Layout.preferredWidth: 120
+                        model: root.lyricFontWeights
+                        currentIndex: root.fontWeightIndex(
+                            root.config("lyric_font_weight_japanese", 0))
+                        onActivated: (index) => {
+                            Configs.setPlugin(root.pluginId, "lyric_font_weight_japanese",
                                               index <= 0 ? 0 : index * 100)
                         }
                     }

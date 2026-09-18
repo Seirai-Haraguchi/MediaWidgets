@@ -19,6 +19,11 @@ import RinUI as Rin         // 限定名导入：只用 Theme/Utils 单例，避
 //   不再绑定 root.width（否则内容无法反过来撑宽组件，副行关闭时横向空间浪费）
 // - 卡拉OK填充扫描：仅当后端 wordTiming=true（QRC/KRC 逐字）时启用；
 //   行级 LRC 只高亮整行，不做填充扫描
+// - 振假名（ruby）：仅 QQ QRC 的 [kana:] 提供数据。汉字的平假名注音以小字画在
+//   主字上方（0.42 倍字号），与主字同色同填充进度；开关由设置页控制，
+//   无假名数据时行高不额外增加
+// - 日语独立字体：仅对含假名的日语歌词行（及假名注音）生效，
+//   跟随全局设置时回落到原文字体
 // - 长音辉光：参考 MediaIsland / AMLL，仅逐字长音（>1000ms）启用，行级绝不套用
 // - 间奏显示：参考 MediaIsland 的 InterludeDotsPresenter——相邻两行之间存在
 //   ≥4s 的长空档（含开头前奏）时，主行换成三个共享基线、依次点亮的呼吸点；
@@ -186,6 +191,19 @@ Widget {
         var w = pluginConfig ? pluginConfig.lyric_font_weight_translation : 0
         return _weightFollowsGlobal(w) ? globalFontWeight : Math.round(Number(w))
     }
+    // 日语独立字体：仅作用于含假名的日语歌词行（及假名注音）
+    readonly property string japaneseFontFamily: {
+        var f = pluginConfig ? pluginConfig.lyric_font_japanese : ""
+        return _fontFollowsGlobal(f) ? "" : f
+    }
+    readonly property int japaneseFontWeight: {
+        var w = pluginConfig ? pluginConfig.lyric_font_weight_japanese : 0
+        return _weightFollowsGlobal(w) ? globalFontWeight : Math.round(Number(w))
+    }
+    // 振假名总开关：关闭后即使歌词带 [kana:] 数据也不显示
+    readonly property bool furiganaEnabled: pluginConfig
+                                           ? pluginConfig.lyric_furigana_enabled !== false
+                                           : true
 
     // 卡拉OK双色：已唱满色、未唱半透明；主文字色不用专辑主色，保证任何封面下都可读
     readonly property color sungColor: Rin.Theme.isDark() ? "#FFFFFF" : "#1B1B1B"
@@ -284,6 +302,10 @@ Widget {
             pixelSize: root.titlePx
             fontFamily: root.originalFontFamily
             fontWeight: root.originalFontWeight
+            lineIsJapanese: backend ? backend.lineIsJapanese : false
+            furiganaEnabled: root.furiganaEnabled
+            japaneseFontFamily: root.japaneseFontFamily
+            japaneseFontWeight: root.japaneseFontWeight
         }
 
         // 间奏：三个呼吸点占住主行的位置，间奏结束后换回下一句歌词
@@ -336,6 +358,33 @@ Widget {
         property int pixelSize: 20
         property string fontFamily: ""
         property int fontWeight: 600
+        // 日语独立字体：仅当整行含假名（lineIsJapanese）且行内有 ruby 时套用
+        property string japaneseFontFamily: ""
+        property int japaneseFontWeight: 600
+        property bool lineIsJapanese: false
+        property bool furiganaEnabled: false
+
+        // 该词是否有可显示的振假名（开关开 + 有 ruby 数据）
+        function wordRuby(word) {
+            if (!furiganaEnabled || !word)
+                return ""
+            return word.ruby ? ("" + word.ruby) : ""
+        }
+
+        // 振假名字号：主字号的 0.42 倍，夹在 [8, 18] 内，避免过大压住主行
+        readonly property int rubyPixelSize: Math.max(8, Math.min(18, Math.round(pixelSize * 0.42)))
+
+        // 日语行：整行（含假名与汉字）走日语字体；其余行维持原文字体
+        readonly property string effectiveFontFamily: {
+            if (lineIsJapanese && japaneseFontFamily !== "")
+                return japaneseFontFamily
+            return fontFamily
+        }
+        readonly property int effectiveFontWeight: {
+            if (lineIsJapanese && japaneseFontFamily !== "")
+                return japaneseFontWeight
+            return fontWeight
+        }
         // 换行瞬间关闭滚动 Behavior，避免从上一行缓动造成抽搐/错位
         property bool scrollAnimating: true
         // 实际应用到 wordRow.x；与 scrollX 目标分离，换行时可瞬时吸附
@@ -457,8 +506,10 @@ Widget {
                     id: wordItem
                     required property var modelData
                     required property int index
+                    // 振假名基线：汉字上方小字占位高度（无假名时为 0，行高与主字号一致）
+                    readonly property real rubyHeight: rubyText.visible ? rubyText.implicitHeight : 0
                     implicitWidth: baseText.width
-                    implicitHeight: baseText.height
+                    implicitHeight: rubyHeight + baseText.height
 
                     // 已唱比例：无逐字时间戳时整词点亮；有则词内线性推进
                     readonly property real fillRatio: {
@@ -527,9 +578,9 @@ Widget {
                                 text: wordItem.modelData.text
                                 color: sweep.fillColor
                                 opacity: 0.55 / 8
-                                font.family: sweep.fontFamily
+                                font.family: sweep.effectiveFontFamily
                                 font.pixelSize: sweep.pixelSize
-                                font.weight: sweep.fontWeight
+                                font.weight: sweep.effectiveFontWeight
                             }
                         }
 
@@ -538,28 +589,46 @@ Widget {
                             text: wordItem.modelData.text
                             color: sweep.fillColor
                             opacity: 0.35
-                            font.family: sweep.fontFamily
+                            font.family: sweep.effectiveFontFamily
                             font.pixelSize: sweep.pixelSize
-                            font.weight: sweep.fontWeight
+                            font.weight: sweep.effectiveFontWeight
                         }
+                    }
+
+                    // 振假名（ruby）：汉字上方小字，水平居中对齐该词；
+                    // 与主字同色同填充进度，随卡拉OK 一起点亮，避免假名滞后/超前
+                    Text {
+                        id: rubyText
+                        objectName: "rubyText"
+                        visible: text !== ""
+                        anchors.horizontalCenter: baseText.horizontalCenter
+                        anchors.bottom: baseText.top
+                        text: sweep.wordRuby(wordItem.modelData)
+                        color: sweep.wordTiming && wordItem.fillRatio < 1.0
+                               ? sweep.baseColor : sweep.fillColor
+                        font.family: sweep.effectiveFontFamily
+                        font.pixelSize: sweep.rubyPixelSize
+                        font.weight: sweep.effectiveFontWeight
                     }
 
                     Text {
                         id: baseText
+                        anchors.top: parent.top
+                        anchors.topMargin: wordItem.rubyHeight
                         text: wordItem.modelData.text
                         // 行级：底层也用满色，避免看起来像卡在唱完态的卡拉OK
                         color: sweep.wordTiming ? sweep.baseColor : sweep.fillColor
-                        font.family: sweep.fontFamily
+                        font.family: sweep.effectiveFontFamily
                         font.pixelSize: sweep.pixelSize
-                        font.weight: sweep.fontWeight
+                        font.weight: sweep.effectiveFontWeight
                     }
 
                     // 卡拉OK顶层裁切：仅逐字模式启用
                     Item {
                         visible: sweep.wordTiming
                         anchors.left: parent.left
-                        anchors.top: parent.top
-                        anchors.bottom: parent.bottom
+                        anchors.top: baseText.top
+                        anchors.bottom: baseText.bottom
                         width: baseText.width * wordItem.fillRatio
                         clip: true
                         Behavior on width {
@@ -572,9 +641,9 @@ Widget {
                             anchors.verticalCenter: parent.verticalCenter
                             text: wordItem.modelData.text
                             color: sweep.fillColor
-                            font.family: sweep.fontFamily
+                            font.family: sweep.effectiveFontFamily
                             font.pixelSize: sweep.pixelSize
-                            font.weight: sweep.fontWeight
+                            font.weight: sweep.effectiveFontWeight
                         }
                     }
                 }

@@ -10,7 +10,7 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QObject, Property, QUrl, Signal, Slot
+from PySide6.QtCore import QObject, Property, QUrl, Signal, Slot, QCoreApplication
 from PySide6.QtQml import QQmlEngine
 
 from PySide6.QtGui import QGuiApplication
@@ -93,6 +93,7 @@ class StubConfigs(QObject):
                         "lyric_gradient_background": True,
                         "lyric_gradient_intensity": 100,
                         "lyric_subtitle_content": "translation_or_next",
+                        "lyric_furigana_enabled": True,
                     }
                 }
             }
@@ -252,6 +253,7 @@ def main():
         ("lyricFontOriginalCard", "原文歌词字体", 7),
         ("lyricFontTranslationCard", "译文歌词字体", 7),
         ("lyricFontRomanizedCard", "罗马音歌词字体", 6),
+        ("lyricFontJapaneseCard", "日语歌词字体", 5),
     ]
     font_selectors = {}
     for name, title, probe_weight in font_cards:
@@ -280,7 +282,7 @@ def main():
                   f"counts={[c.property('count') for c in combos]}", flush=True)
             return 1
         font_selectors[name] = (fonts[0], weights[0], probe_weight)
-    print("font settings: 3 SettingCards, each with title/description/2 selectors",
+    print("font settings: 4 SettingCards, each with title/description/2 selectors",
           flush=True)
 
     # 字体/字重选择器读的是同一份共享列表与同一批插件配置键
@@ -309,6 +311,46 @@ def main():
         return 1
     print("font settings: selectors persist to the plugin config", flush=True)
 
+    # 振假名开关卡：默认开、可写回插件配置（关掉后歌词组件不再渲染假名）
+    furigana_card = find_object("lyricFuriganaCard")
+    if furigana_card is None:
+        print("FAIL: lyricFuriganaCard missing", flush=True)
+        return 1
+    furigana_switch = [c for c in furigana_card.findChildren(QObject)
+                       if "Switch" in c.metaObject().className()]
+    if len(furigana_switch) != 1:
+        print(f"FAIL: lyricFuriganaCard should host exactly 1 Switch, "
+              f"got {len(furigana_switch)}", flush=True)
+        return 1
+    furigana_switch = furigana_switch[0]
+    if not furigana_switch.property("checked"):
+        print("FAIL: 振假名 should default to on", flush=True)
+        return 1
+    # 注意：RinUI Switch 继承 QQuickAbstractButton。Qt 6 里用 setProperty("checked", …)
+    # 或 toggle() 都只发 checkedChanged，**不发 toggled**（toggled 只在真实交互
+    # 路径上发射），而页面的处理器挂在 onToggled 上。要覆盖真实写回路径，
+    # 必须模拟一次鼠标点击，而不是改属性——否则这条断言就是假绿。
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtCore import QEvent
+
+    center = furigana_switch.property("width") / 2.0
+    mid = furigana_switch.property("height") / 2.0
+    press = QMouseEvent(QEvent.Type.MouseButtonPress, QPointF(center, mid),
+                        QPointF(0, 0), Qt.MouseButton.LeftButton,
+                        Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    release = QMouseEvent(QEvent.Type.MouseButtonRelease, QPointF(center, mid),
+                          QPointF(0, 0), Qt.MouseButton.LeftButton,
+                          Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier)
+    QCoreApplication.sendEvent(furigana_switch, press)
+    QCoreApplication.sendEvent(furigana_switch, release)
+    app.processEvents()
+    if configs.written.get("lyric_furigana_enabled") is not False:
+        print(f"FAIL: furigana switch did not persist on click, "
+              f"written={configs.written}", flush=True)
+        return 1
+    print("furigana: switch card present, on by default, persists to config", flush=True)
+
     # 图标名必须存在于 RinUI 字体图标索引（缺失即页面“缺图标”）
     icon_names = [
         "ic_fluent_music_note_2_20_regular",
@@ -326,6 +368,8 @@ def main():
         "ic_fluent_translate_20_regular",
         "ic_fluent_text_align_left_20_regular",
         "ic_fluent_subtitles_20_regular",
+        "ic_fluent_local_language_20_regular",
+        "ic_fluent_text_font_20_regular",
     ]
     index_js = (
         RINUI_QML_DIR / "RinUI" / "assets" / "fonts" / "FluentSystemIcons-Index.js"

@@ -33,6 +33,9 @@ class MediaWidgetsConfig(ConfigBaseModel):
     # 歌词组件副行：translation_or_next / translation_or_none / next / none
     lyric_subtitle_content: str = "translation_or_next"
 
+    # 日语歌词振假名（ruby）显示开关；无假名数据时自动隐藏
+    lyric_furigana_enabled: bool = True
+
     # 歌词字体：空字符串 / 0 表示跟随全局主界面字体与字重
     lyric_font_original: str = ""
     lyric_font_weight_original: int = 0
@@ -40,3 +43,5 @@ class MediaWidgetsConfig(ConfigBaseModel):
     lyric_font_weight_translation: int = 0
     lyric_font_romanized: str = ""
     lyric_font_weight_romanized: int = 0
+    lyric_font_japanese: str = ""
+    lyric_font_weight_japanese: int = 0

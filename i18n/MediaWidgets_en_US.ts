@@ -4,32 +4,32 @@
 <context>
     <name>LyricsWidget</name>
     <message>
-        <location filename="../qml/LyricsWidget.qml" line="165"/>
+        <location filename="../qml/LyricsWidget.qml" line="170"/>
         <source>跟随全局字体</source>
         <translation>Follow Global Font</translation>
     </message>
     <message>
-        <location filename="../qml/LyricsWidget.qml" line="195"/>
+        <location filename="../qml/LyricsWidget.qml" line="213"/>
         <source>Lyrics</source>
         <translation>Lyrics</translation>
     </message>
     <message>
-        <location filename="../qml/LyricsWidget.qml" line="256"/>
+        <location filename="../qml/LyricsWidget.qml" line="274"/>
         <source>未在播放</source>
         <translation>Not Playing</translation>
     </message>
     <message>
-        <location filename="../qml/LyricsWidget.qml" line="258"/>
+        <location filename="../qml/LyricsWidget.qml" line="276"/>
         <source>正在获取歌词…</source>
         <translation>Fetching lyrics…</translation>
     </message>
     <message>
-        <location filename="../qml/LyricsWidget.qml" line="259"/>
+        <location filename="../qml/LyricsWidget.qml" line="277"/>
         <source>未找到这首歌的歌词</source>
         <translation>No lyrics found for this song</translation>
     </message>
     <message>
-        <location filename="../qml/LyricsWidget.qml" line="260"/>
+        <location filename="../qml/LyricsWidget.qml" line="278"/>
         <source>歌词获取失败</source>
         <translation>Failed to fetch lyrics</translation>
     </message>
@@ -235,48 +235,70 @@
         <translation>Hide</translation>
     </message>
     <message>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="501"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="498"/>
+        <source>日语歌词振假名</source>
+        <translation>Japanese furigana</translation>
+    </message>
+    <message>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="499"/>
+        <source>在日语歌词的汉字上方显示平假名注音。仅在歌词源提供注音数据（QQ 音乐）时可见。</source>
+        <translation>Show hiragana readings above the kanji of Japanese lyrics. Only available when the lyric source provides readings (QQ Music).</translation>
+    </message>
+    <message>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="516"/>
         <source>原文歌词字体</source>
         <translation>Original Lyrics Font</translation>
     </message>
     <message>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="502"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="517"/>
         <source>显示原文歌词时使用的字体和字重。选择「跟随全局字体」时，使用全局字体设置中的主界面字体。</source>
         <translation>Font and weight used for the original lyrics. Follow Global Font uses the main font from the global font settings.</translation>
     </message>
     <message>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="508"/>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="560"/>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="612"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="523"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="575"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="627"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="679"/>
         <source>字体</source>
         <translation>Font</translation>
     </message>
     <message>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="530"/>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="582"/>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="634"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="545"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="597"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="649"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="701"/>
         <source>字重</source>
         <translation>Weight</translation>
     </message>
     <message>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="553"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="568"/>
         <source>译文歌词字体</source>
         <translation>Translation Lyrics Font</translation>
     </message>
     <message>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="554"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="569"/>
         <source>显示译文歌词时使用的字体和字重。该行没有译文而回退显示原文时，仍按原文歌词的字体设置渲染。</source>
         <translation>Font and weight used for translated lyrics. When a line has no translation and falls back to the original text, the original lyrics font still applies.</translation>
     </message>
     <message>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="605"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="620"/>
         <source>罗马音歌词字体</source>
         <translation>Romanized Lyrics Font</translation>
     </message>
     <message>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="606"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="621"/>
         <source>显示罗马音歌词时使用的字体和字重。选择「跟随全局字体」时，使用全局字体设置中的主界面字体。</source>
         <translation>Font and weight used for romanized lyrics. Follow Global Font uses the main font from the global font settings.</translation>
+    </message>
+    <message>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="672"/>
+        <source>日语歌词字体</source>
+        <translation>Japanese lyrics font</translation>
+    </message>
+    <message>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="673"/>
+        <source>显示日语歌词（含假名注音）时使用的字体和字重，仅对含假名的歌词行生效。选择「跟随全局字体」时，使用全局字体设置中的主界面字体。</source>
+        <translation>Font and weight used for Japanese lyric lines, including furigana. Applies only to lines containing kana. Choosing “follow global font” uses the main UI font from the global font settings.</translation>
     </message>
 </context>
 </TS>

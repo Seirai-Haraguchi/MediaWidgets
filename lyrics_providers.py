@@ -51,12 +51,15 @@ _INSTRUMENTAL_LINE = re.compile(
 
 
 class LyricWord:
-    __slots__ = ("start_ms", "end_ms", "text")
+    __slots__ = ("start_ms", "end_ms", "text", "ruby")
 
-    def __init__(self, start_ms, end_ms, text):
+    def __init__(self, start_ms, end_ms, text, ruby=""):
         self.start_ms = start_ms
         self.end_ms = end_ms
         self.text = text
+        # 振假名（ruby）：日语歌词中该词对应汉字的平假名注音；
+        # 仅 QQ QRC 的 [kana:] 提供，非日语源恒为空串。
+        self.ruby = ruby
 
 
 class LyricLine:
@@ -134,12 +137,114 @@ _QRC_WORD = re.compile(r"\((\d+),(\d+)\)")
 # 纯元数据行（[ti:] [ar:] [offset:] 等）不生成歌词行
 _QRC_META = re.compile(r"^\[[a-zA-Z#]+:")
 
+# [kana:] 振假名行：QQ 音乐为日语歌词提供逐汉字平假名注音
+_QRC_KANA = re.compile(r"^\[kana:(.*)\]$")
+# 注音条目里的逐字时间戳（与 QRC 正文词级时间戳同源）
+_KANA_TIMING = re.compile(r"\((\d+),(\d+)\)")
+# 判定某字符是否可承载注音：CJK 统一表意文字（汉字）；假名/拉丁/标点不注音
+_KANJI = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+
+
+def _split_kana_entries(blob):
+    """把 [kana:] 内容切成条目序列。
+
+    文法：条目之间用裸 '1' 分隔；条目本身是「注音文字 (+ 逐字时间戳)」序列，
+    因此分隔符只认**括号外**的 '1'（时间戳里也有数字，不能一并切开）。
+    前导 '1' 会产生一个空的首条目，去掉它。
+    """
+    entries = []
+    buf = []
+    depth = 0
+    for ch in blob:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+        if ch == "1" and depth == 0:
+            entries.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+    entries.append("".join(buf))
+    if entries and entries[0] == "":
+        entries.pop(0)  # 去掉前导分隔符造成的空条目
+    return entries
+
+
+def _kana_reading(entry):
+    """从注音条目里取出纯假名文字（丢掉逐字时间戳）。"""
+    return _KANA_TIMING.sub("", entry)
+
+
+def parse_kana(qrc_text):
+    """解析 QRC 的 [kana:] 行，返回 [(假名, 时间戳ms|None), ...]（按出现顺序）。
+
+    条目里可能带逐字时间戳，如 `き(3428,116)ょ(3544,116)く(3660,233)`；
+    时间戳是该注音对应汉字在正文里的实际时间，用来在顺序对齐出现偏差时重定位。
+    """
+    raw = None
+    for line in (qrc_text or "").splitlines():
+        m = _QRC_KANA.match(line.strip())
+        if m:
+            raw = m.group(1)
+            break
+    if raw is None:
+        return []
+    readings = []
+    for entry in _split_kana_entries(raw):
+        reading = _kana_reading(entry)
+        # 时间戳取该条目里出现的第一个（同一汉字的注音被拆成多段时以首段为准）
+        tm = _KANA_TIMING.search(entry)
+        if reading:
+            readings.append((reading, int(tm.group(1)) if tm else None))
+    return readings
+
+
+def _attach_kana(words, readings):
+    """把假名按汉字顺序贴到 words 上（一个汉字一条注音）。
+
+    对齐规则（对真实 QRC 逐步验证得到）：
+    - [kana:] 条目按「汉字骨架」排序：每个含汉字的字符各占一条，假名/拉丁/标点跳过；
+    - 条目自带时间戳时以时间为准——正文里 start_ms 相同的词才是它的宿主，
+      据此可以纠正顺序计数因源数据缺项产生的漂移（QQ 的信用行偶有缺项）；
+    - 数据不足/多余都不报错，能贴多少贴多少。
+    """
+    if not readings:
+        return
+    # 正文汉字 -> 词 的映射（按时间索引，供时间戳重定位使用）
+    by_start = {}
+    for w in words:
+        by_start.setdefault(w.start_ms, w)
+
+    cursor = 0  # 顺序对齐时下一个待分配的词下标
+    for reading, tm in readings:
+        target = None
+        if tm is not None and tm in by_start:
+            cand = by_start[tm]
+            if _KANJI.search(cand.text or ""):
+                target = cand
+                # 时间锚点命中：把顺序游标同步到该词之后，抑制累计漂移
+                try:
+                    cursor = words.index(cand) + 1
+                except ValueError:
+                    pass
+        if target is None:
+            # 无时间锚点（或锚点对不上）时按键位顺序找下一个含汉字的词
+            while cursor < len(words) and not _KANJI.search(words[cursor].text or ""):
+                cursor += 1
+            if cursor >= len(words):
+                continue
+            target = words[cursor]
+            cursor += 1
+        target.ruby = (target.ruby or "") + reading
+
 
 def parse_qrc(qrc_text):
     """解析 QRC 为 [LyricLine]。
 
     语法：[行起始ms,行时长ms]字(绝对起始ms,时长ms)字(绝对起始ms,时长ms)…
     单词时间戳跟在文字后面（绝对毫秒）；[ti:] 等元数据行跳过。
+    [kana:...] 为日语振假名（逐汉字平假名注音），按汉字顺序贴到对应词上。
     """
     lines = []
     for raw in (qrc_text or "").splitlines():
@@ -169,6 +274,12 @@ def parse_qrc(qrc_text):
         if not text.strip():
             continue  # 间奏占位行
         lines.append(LyricLine(start_ms, end_ms, text.strip(), words))
+
+    # 振假名：按全篇汉字顺序对齐（[kana:] 是整首歌一条，不分行）
+    readings = parse_kana(qrc_text)
+    if readings and lines:
+        flat = [w for ln in lines for w in ln.words]
+        _attach_kana(flat, readings)
     return lines
 
 

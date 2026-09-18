@@ -38,8 +38,73 @@ def test_parse_qrc():
     print("PASS parse_qrc")
 
 
+def test_qrc_kana_furigana():
+    """QQ QRC [kana:] 振假名解析：条目以括号外的裸 '1' 分隔，注音按汉字顺序对齐。
+
+    语法要点（实测逆向所得）：
+    - [kana:] 是整首歌一条，不分行；
+    - 条目分隔符是**括号外的**字面 '1' —— 时间戳 (3428,116) 里的数字不能当分隔符；
+    - 条目 = 假名读音 + 可选 (start_ms, dur_ms) 逐词时间戳；
+    - **一条注音对应一个含汉字的词**，纯假名/拉丁/标点词不占条目。
+      这一条决定了 fixture 必须写成「每个汉字词一条读音」，多塞一条纯假名读音
+      会把其后所有注音整体推移（这是格式本身的约定，不是解析缺陷）。
+    - 带时间戳的条目是可靠锚点（其 start_ms 等于 QRC 该词的 start_ms）。
+    """
+    # 分行覆盖：汉字+假名混排行、纯假名行、带时间锚点的行
+    qrc = "\n".join([
+        "[ti:テスト]",
+        "[0,2000]涙(0,900)の(900,300)雨(1200,800)",
+        "[2000,2000]きれいだね",
+        "[4000,2000]黄昏(4000,900)を(4900,300)眺(5200,800)めて",
+        "[kana:なみだ1あめ1たそがれ(4000,900)1なが]",
+    ])
+    lines = lp.parse_qrc(qrc)
+    assert len(lines) == 3, f"expect 3 lines, got {len(lines)}"
+
+    l0 = lines[0]
+    assert l0.text == "涙の雨", repr(l0.text)
+    assert l0.words[0].text == "涙" and l0.words[0].ruby == "なみだ", \
+        [(w.text, w.ruby) for w in l0.words]
+    assert l0.words[1].text == "の" and l0.words[1].ruby == "", \
+        "纯假名词不该被挂上 ruby（它不占 [kana:] 条目）"
+    assert l0.words[2].text == "雨" and l0.words[2].ruby == "あめ", \
+        [(w.text, w.ruby) for w in l0.words]
+    print("PASS qrc kana: 汉字挂注音、纯假名词留空")
+
+    # 纯假名行：整行无汉字 → 全部空 ruby，不会误挂
+    l1 = lines[1]
+    assert l1.text == "きれいだね"
+    assert all(w.ruby == "" for w in l1.words), \
+        f"纯假名行不该有 ruby，got {[w.ruby for w in l1.words]}"
+
+    # 时间锚点：带时间戳的注音必须落在同 start_ms 的词上
+    l2 = lines[2]
+    assert l2.words[0].text == "黄昏" and l2.words[0].ruby == "たそがれ", \
+        f"锚点对齐失败: text={l2.words[0].text!r} ruby={l2.words[0].ruby!r}"
+    assert l2.words[1].text == "を" and l2.words[1].ruby == "", \
+        [(w.text, w.ruby) for w in l2.words]
+    assert l2.words[-1].text == "眺めて" and l2.words[-1].ruby == "なが", \
+        f"锚点后顺序回退失败: text={l2.words[-1].text!r} ruby={l2.words[-1].ruby!r}"
+
+    # 无 [kana:] 的文档：全篇 ruby 恒为空串（非日语源不会凭空多出注音）
+    plain = lp.parse_qrc("\n".join([
+        "[ti:x]", "[0,1000]晴(0,500)天(500,500)",
+    ]))
+    assert all(w.ruby == "" for ln in plain for w in ln.words), \
+        "无 [kana:] 时 ruby 必须为空"
+
+
+def test_qrc_kana_paren_timings_are_not_separators():
+    """回归守卫：分隔符判定必须忽略括号内的数字，否则注音会被时间戳切碎。"""
+    blob = "きょく1うた(3428,116)1こころ"
+    entries = lp._split_kana_entries(blob)
+    assert entries == ["きょく", "うた(3428,116)", "こころ"], entries
+    readings = lp.parse_kana("[kana:" + blob + "]")
+    assert [r for r, _ in readings] == ["きょく", "うた", "こころ"], readings
+    assert [t for _, t in readings] == [None, 3428, None], readings
+
+
 def test_parse_krc():
-    # 真实样本：酷狗《Lemon》首行（时间戳在前、字在后，相对行首偏移）
     lang_json = json.dumps({"content": [
         {"type": 1, "lyricContent": [["梦いっぱい"], ["如果只是一场梦"]]},
     ]})
@@ -127,6 +192,8 @@ def test_meaningful_lyrics_filter():
 
 if __name__ == "__main__":
     test_parse_qrc()
+    test_qrc_kana_furigana()
+    test_qrc_kana_paren_timings_are_not_separators()
     test_parse_krc()
     test_apply_lrc_translation()
     test_decrypt_krc_roundtrip()

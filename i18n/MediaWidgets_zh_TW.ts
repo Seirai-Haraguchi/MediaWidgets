@@ -4,32 +4,32 @@
 <context>
     <name>LyricsWidget</name>
     <message>
-        <location filename="../qml/LyricsWidget.qml" line="165"/>
+        <location filename="../qml/LyricsWidget.qml" line="170"/>
         <source>跟随全局字体</source>
         <translation>跟隨全域字型</translation>
     </message>
     <message>
-        <location filename="../qml/LyricsWidget.qml" line="195"/>
+        <location filename="../qml/LyricsWidget.qml" line="213"/>
         <source>Lyrics</source>
         <translation>歌詞</translation>
     </message>
     <message>
-        <location filename="../qml/LyricsWidget.qml" line="256"/>
+        <location filename="../qml/LyricsWidget.qml" line="274"/>
         <source>未在播放</source>
         <translation>未在播放</translation>
     </message>
     <message>
-        <location filename="../qml/LyricsWidget.qml" line="258"/>
+        <location filename="../qml/LyricsWidget.qml" line="276"/>
         <source>正在获取歌词…</source>
         <translation>正在取得歌詞…</translation>
     </message>
     <message>
-        <location filename="../qml/LyricsWidget.qml" line="259"/>
+        <location filename="../qml/LyricsWidget.qml" line="277"/>
         <source>未找到这首歌的歌词</source>
         <translation>找不到這首歌的歌詞</translation>
     </message>
     <message>
-        <location filename="../qml/LyricsWidget.qml" line="260"/>
+        <location filename="../qml/LyricsWidget.qml" line="278"/>
         <source>歌词获取失败</source>
         <translation>歌詞取得失敗</translation>
     </message>
@@ -235,48 +235,70 @@
         <translation>不顯示</translation>
     </message>
     <message>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="501"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="498"/>
+        <source>日语歌词振假名</source>
+        <translation>日語歌詞振假名</translation>
+    </message>
+    <message>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="499"/>
+        <source>在日语歌词的汉字上方显示平假名注音。仅在歌词源提供注音数据（QQ 音乐）时可见。</source>
+        <translation>在日語歌詞的漢字上方顯示平假名注音。僅在歌詞來源提供注音資料（QQ 音樂）時可見。</translation>
+    </message>
+    <message>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="516"/>
         <source>原文歌词字体</source>
         <translation>原文歌詞字型</translation>
     </message>
     <message>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="502"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="517"/>
         <source>显示原文歌词时使用的字体和字重。选择「跟随全局字体」时，使用全局字体设置中的主界面字体。</source>
         <translation>顯示原文歌詞時使用的字型和字重。選擇「跟隨全域字型」時，使用全域字型設定中的主介面字型。</translation>
     </message>
     <message>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="508"/>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="560"/>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="612"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="523"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="575"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="627"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="679"/>
         <source>字体</source>
         <translation>字型</translation>
     </message>
     <message>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="530"/>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="582"/>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="634"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="545"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="597"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="649"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="701"/>
         <source>字重</source>
         <translation>字重</translation>
     </message>
     <message>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="553"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="568"/>
         <source>译文歌词字体</source>
         <translation>譯文歌詞字型</translation>
     </message>
     <message>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="554"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="569"/>
         <source>显示译文歌词时使用的字体和字重。该行没有译文而回退显示原文时，仍按原文歌词的字体设置渲染。</source>
         <translation>顯示譯文歌詞時使用的字型和字重。若該行沒有譯文而回退顯示原文，仍依原文歌詞的字型設定呈現。</translation>
     </message>
     <message>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="605"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="620"/>
         <source>罗马音歌词字体</source>
         <translation>羅馬拼音歌詞字型</translation>
     </message>
     <message>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="606"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="621"/>
         <source>显示罗马音歌词时使用的字体和字重。选择「跟随全局字体」时，使用全局字体设置中的主界面字体。</source>
         <translation>顯示羅馬拼音歌詞時使用的字型和字重。選擇「跟隨全域字型」時，使用全域字型設定中的主介面字型。</translation>
+    </message>
+    <message>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="672"/>
+        <source>日语歌词字体</source>
+        <translation>日語歌詞字型</translation>
+    </message>
+    <message>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="673"/>
+        <source>显示日语歌词（含假名注音）时使用的字体和字重，仅对含假名的歌词行生效。选择「跟随全局字体」时，使用全局字体设置中的主界面字体。</source>
+        <translation>顯示日語歌詞（含假名注音）時使用的字型與字重，僅對含假名的歌詞行生效。選擇「跟隨全域字型」時，使用全域字型設定中的主介面字型。</translation>
     </message>
 </context>
 </TS>

@@ -184,6 +184,7 @@ class StubLyricsBackend(QObject):
             {"text": "周杰伦", "startMs": 2600, "endMs": 3800},
         ]
         self._word_timing = True
+        self._line_is_japanese = False
         self._sub_line = "Sunny day"
         self._position_ms = 1300
         self._interlude = False
@@ -215,6 +216,10 @@ class StubLyricsBackend(QObject):
     def wordTiming(self):
         return self._word_timing
 
+    @Property(bool, notify=lineChanged)
+    def lineIsJapanese(self):
+        return self._line_is_japanese
+
     @Property(str, notify=lineChanged)
     def subLine(self):
         return self._sub_line
@@ -232,10 +237,12 @@ class StubLyricsBackend(QObject):
         self._position_ms = ms
         self.positionChanged.emit()
 
-    def set_line(self, words, word_timing=True, sub_line=""):
+    def set_line(self, words, word_timing=True, sub_line="", japanese=None):
         self._words = words
         self._word_timing = word_timing
         self._sub_line = sub_line
+        if japanese is not None:
+            self._line_is_japanese = japanese
         self.lineChanged.emit()
 
     @Property(bool, notify=interludeChanged)
@@ -277,6 +284,7 @@ class StubConfigs(QObject):
             "lyric_gradient_background": True,
             "lyric_gradient_intensity": 100,
             "lyric_subtitle_content": "translation_or_next",
+            "lyric_furigana_enabled": True,
         }
 
     def set_pref(self, key, value):
@@ -787,6 +795,104 @@ def main():
         print(f"FAIL: translation font family, got {root.property('translationFontFamily')}")
         return 1
     print("fonts: original/translation settings apply live", flush=True)
+
+    # ---- 日语独立字体 + 振假名 ----
+    # 日语字体只对「含假名」的行生效：非日语行应回落到原文字体。
+    configs.set_pref("lyric_font_japanese", "Yu Gothic")
+    configs.set_pref("lyric_font_weight_japanese", 500)
+    backend.set_line(
+        [{"text": "涙", "startMs": 0, "endMs": 1000, "ruby": "なみだ"},
+         {"text": "の", "startMs": 1000, "endMs": 1500, "ruby": ""},
+         {"text": "雨", "startMs": 1500, "endMs": 2600, "ruby": "あめ"}],
+        True, "", japanese=True)
+    backend.set_position(200)
+    _wait(120)
+    if root.property("japaneseFontFamily") != "Yu Gothic":
+        print(f"FAIL: japanese font family, got {root.property('japaneseFontFamily')}")
+        return 1
+    if int(root.property("japaneseFontWeight") or 0) != 500:
+        print(f"FAIL: japanese font weight, got {root.property('japaneseFontWeight')}")
+        return 1
+    sweep = _find_sweep()
+    if sweep is None:
+        print("FAIL: sweep not found for furigana assertions")
+        return 1
+    eff, _ = QQmlExpression(engine.rootContext(), sweep, "effectiveFontFamily").evaluate()
+    if eff != "Yu Gothic":
+        print(f"FAIL: japanese line should use japanese font, got {eff}")
+        return 1
+
+    # 非日语行：即使配了日语字体也必须回落到原文字体，避免误伤中文/英文歌词
+    backend.set_line([{"text": "晴天", "startMs": 0, "endMs": 1000, "ruby": ""}],
+                     True, "", japanese=False)
+    _wait(120)
+    eff, _ = QQmlExpression(engine.rootContext(), sweep, "effectiveFontFamily").evaluate()
+    if eff != "Consolas":
+        print(f"FAIL: non-japanese line must fall back to original font, got {eff}")
+        return 1
+
+    # 振假名渲染：汉字上方小字，字号约主字号 0.42 倍，行高随之抬升
+    backend.set_line(
+        [{"text": "涙", "startMs": 0, "endMs": 1000, "ruby": "なみだ"}],
+        True, "", japanese=True)
+    _wait(150)
+    row = _find_wordrow()
+    if row is None:
+        print("FAIL: wordRow not found for furigana assertion")
+        return 1
+    rep_list = [o for o in row.findChildren(QObject)
+                if o.metaObject().className().startswith("QQuickRepeater")]
+    if not rep_list:
+        print("FAIL: Repeater not found for furigana assertion")
+        return 1
+    rep = rep_list[0]
+    word_item, _ = QQmlExpression(engine.rootContext(), rep, "itemAt(0)").evaluate()
+    if word_item is None:
+        print("FAIL: Repeater.itemAt(0) returned None")
+        return 1
+    ruby_items = [o for o in word_item.findChildren(QObject)
+                  if o.objectName() == "rubyText"]
+    if len(ruby_items) != 1:
+        print(f"FAIL: expect 1 rubyText for 1 word, got {len(ruby_items)}")
+        return 1
+    ruby = ruby_items[0]
+    ruby_str, _ = QQmlExpression(engine.rootContext(), ruby, "text").evaluate()
+    if ruby_str != "なみだ":
+        print(f"FAIL: ruby text should be なみだ, got {ruby_str!r}")
+        return 1
+    ruby_px, _ = QQmlExpression(engine.rootContext(), ruby, "font.pixelSize").evaluate()
+    ruby_vis, _ = QQmlExpression(engine.rootContext(), ruby, "visible").evaluate()
+    if not ruby_vis:
+        print("FAIL: ruby should be visible for a word carrying kana reading")
+        return 1
+    if not (8 <= int(ruby_px) <= 18) or int(ruby_px) >= int(root.property("titlePx")):
+        print(f"FAIL: ruby pixel size should be a small fraction of the main size, "
+              f"got {ruby_px} vs main {root.property('titlePx')}")
+        return 1
+
+    # 关掉总开关：假名必须立刻消失（数据仍在，只是不渲染）
+    configs.set_pref("lyric_furigana_enabled", False)
+    _wait(150)
+    ruby_vis, _ = QQmlExpression(engine.rootContext(), ruby, "visible").evaluate()
+    if ruby_vis:
+        print("FAIL: disabling lyric_furigana_enabled must hide ruby")
+        return 1
+    configs.set_pref("lyric_furigana_enabled", True)
+    _wait(150)
+    ruby_vis, _ = QQmlExpression(engine.rootContext(), ruby, "visible").evaluate()
+    if not ruby_vis:
+        print("FAIL: re-enabling lyric_furigana_enabled must show ruby again")
+        return 1
+    print("furigana: kana rendered above kanji, gated by setting, japanese font scoped",
+          flush=True)
+    configs.set_pref("lyric_font_japanese", "")
+    configs.set_pref("lyric_font_weight_japanese", 0)
+    backend.set_line(
+        [{"text": "晴天", "startMs": 1000, "endMs": 1600, "ruby": ""},
+         {"text": " ", "startMs": 1600, "endMs": 2600, "ruby": ""},
+         {"text": "周杰伦", "startMs": 2600, "endMs": 3800, "ruby": ""}],
+        True, "Sunny day", japanese=False)
+    _wait(100)
 
     # ---- 真后端 × 真组件：间奏信号的时序契约 ----
     # 上面的间奏断言都走桩后端（set_interlude 先置位再 emit），因此掩盖了真后端

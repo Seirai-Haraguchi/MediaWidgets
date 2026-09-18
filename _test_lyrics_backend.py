@@ -133,7 +133,8 @@ def test_line_level_doc_single_word():
     media._pos = 1000
     backend._on_tick()
     check("line-level single word",
-          backend.words == [{"text": "第一行", "startMs": 0, "endMs": 4000}],
+          backend.words == [{"text": "第一行", "startMs": 0, "endMs": 4000,
+                             "ruby": ""}],
           str(backend.words))
     check("line-level has no word timing", backend.wordTiming is False)
     # 第一行无翻译 → 下一行预览
@@ -152,6 +153,36 @@ def test_word_timing_flag_for_qrc():
     backend._on_tick()
     check("word-level timing enabled", backend.wordTiming is True)
     check("word-level has multiple words", len(backend.words) >= 2, str(backend.words))
+
+
+def test_line_is_japanese_and_ruby_passthrough():
+    """lineIsJapanese 按假名判定；ruby 从 LyricWord 透传到 QML 的 word 字典。"""
+    doc = lp.LyricsDocument([
+        lp.LyricLine(0, 2000, "涙の雨",
+                     [lp.LyricWord(0, 900, "涙", "なみだ"),
+                      lp.LyricWord(900, 1200, "の", ""),
+                      lp.LyricWord(1200, 2000, "雨", "あめ")], None),
+        lp.LyricLine(3000, 5000, "晴天 周杰伦",
+                     [lp.LyricWord(3000, 5000, "晴天 周杰伦")], None),
+    ], "qqmusic", "判定")
+    backend, media, _ = make_backend(fetch=lambda *a: (doc, "qqmusic"))
+    backend._on_song_changed("判定", "艺")
+    backend._fetch_worker(backend._gen, "判定", "艺", media.duration_ms, "auto")
+
+    media._pos = 500
+    backend._on_tick()
+    check("japanese line flagged", backend.lineIsJapanese is True,
+          str(backend.lineIsJapanese))
+    check("ruby passed through to words",
+          [w.get("ruby") for w in backend.words] == ["なみだ", "", "あめ"],
+          str(backend.words))
+
+    # 切到纯中文行：标记必须立刻回落，否则中文行会被套上日语字体
+    media._pos = 4000
+    backend._on_tick()
+    check("non-japanese line not flagged", backend.lineIsJapanese is False)
+    check("non-japanese words carry empty ruby",
+          all(w.get("ruby") == "" for w in backend.words), str(backend.words))
 
 
 def test_seek_updates_line():
@@ -484,6 +515,7 @@ if __name__ == "__main__":
     test_subtitle_modes()
     test_line_level_doc_single_word()
     test_word_timing_flag_for_qrc()
+    test_line_is_japanese_and_ruby_passthrough()
     test_seek_updates_line()
     test_stale_generation_discarded()
     test_nomatch_and_error_states()

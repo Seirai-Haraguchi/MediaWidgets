@@ -5,10 +5,13 @@ lyrics_backend.py
 进度节拍等动态属性。
 
 - 完全不动灵动通知：渲染全部在插件自己的歌词小组件里完成；
-- 逐字歌词（QQ QRC / 酷狗 KRC）输出 word 级 [{text, startMs, endMs}]，
-  并置 wordTiming=true，QML 走卡拉OK 填充扫描；
+- 逐字歌词（QQ QRC / 酷狗 KRC）输出 word 级 [{text, startMs, endMs, ruby}]，
+  并置 wordTiming=true，QML 走卡拉OK 填充扫描；ruby 为日语振假名（仅 QQ QRC 的
+  [kana:] 提供），QML 在汉字上方以小字渲染，开关由设置页控制；
 - 行级歌词（网易云 LRC）输出整行单 word + wordTiming=false，
   QML 只显示当前行（不套逐字填充效果）；
+- lineIsJapanese 标记当前行是否含假名，QML 据此对该行（及假名注音）套用
+  独立的日语字体设置；
 - 副行规则：当前行有翻译且开启翻译 → 显示翻译；否则显示下一行歌词预览；
 - 间奏规则（参考 MediaIsland 的 LyricsInterludeDetector）：相邻两行之间（含开头前奏）
   若存在 ≥4s 且未被下一句 250ms 提前量吃掉的空档，则判为间奏——期间不输出任何歌词行，
@@ -25,6 +28,7 @@ lyrics_backend.py
 import hashlib
 import json
 import os
+import re
 import sys
 import threading
 from pathlib import Path
@@ -39,6 +43,14 @@ _DEBOUNCE_MS = 800    # 换歌防抖：SMTC 标题/艺人常分字段先后到�
 _CACHE_MAX = 300      # 磁盘缓存条目上限（超出按最旧淘汰）
 _INTERLUDE_MIN_MS = 4000     # 间奏最短时长：短于它的行间空档不算间奏
 _INTERLUDE_END_LEAD_MS = 250  # 间奏末尾提前量：留给下一句歌词预显示
+
+# 平假名 + 片假名（不含长音符 ー，纯中文/纯英文行不应被判为日语）
+_KANA_RE = re.compile(r"[\u3041-\u3096\u30a1-\u30fa]")
+
+
+def _is_japanese(text):
+    """行文本是否含假名——日语独立字体只对这些行（及假名注音）生效。"""
+    return bool(_KANA_RE.search(text or ""))
 
 
 def _default_cache_dir():
@@ -62,7 +74,7 @@ def doc_to_json(doc):
                 "e": ln.end_ms,
                 "t": ln.text,
                 "tr": ln.translation,
-                "w": [[w.start_ms, w.end_ms, w.text] for w in ln.words],
+                "w": [[w.start_ms, w.end_ms, w.text, w.ruby] for w in ln.words],
             }
             for ln in doc.lines
         ],
@@ -70,10 +82,16 @@ def doc_to_json(doc):
 
 
 def doc_from_json(data):
+    def _word(raw):
+        # 兼容 v1 旧缓存：第三项之后可能没有 ruby
+        start, end, text = raw[0], raw[1], raw[2]
+        ruby = raw[3] if len(raw) > 3 else ""
+        return lyrics_providers.LyricWord(start, end, text, ruby)
+
     lines = [
         lyrics_providers.LyricLine(
             ln["s"], ln["e"], ln["t"],
-            words=[lyrics_providers.LyricWord(s, e, t) for s, e, t in ln.get("w") or []],
+            words=[_word(raw) for raw in ln.get("w") or []],
             translation=ln.get("tr"),
         )
         for ln in data.get("lines") or []
@@ -114,9 +132,10 @@ class LyricsBackend(QObject):
         self._applied_source = None   # 当前 _doc 对应的请求源（含 "auto"）
         self._last_subtitle_mode = None  # None = 尚未读过（避免首帧误判成"变了"）
 
-        self._words = []         # QVariantList：[{text, startMs, endMs}]
+        self._words = []         # QVariantList：[{text, startMs, endMs, ruby}]
         self._word_timing = False  # 当前行是否含逐字时间戳（决定是否启用卡拉OK）
         self._line_text = ""
+        self._line_is_japanese = False  # 当前行是否含假名（决定用不用日语字体）
         self._sub_line = ""
         self._sub_is_translation = False
 
@@ -176,6 +195,11 @@ class LyricsBackend(QObject):
     def wordTiming(self):
         """当前行是否含词级时间戳；行级 LRC 为 False，不应套卡拉OK填充。"""
         return self._word_timing
+
+    @Property(bool, notify=lineChanged)
+    def lineIsJapanese(self):
+        """当前行是否含平假名/片假名；QML 据此切到日语独立字体。"""
+        return self._line_is_japanese
 
     @Property(str, notify=lineChanged)
     def subLine(self):
@@ -441,17 +465,21 @@ class LyricsBackend(QObject):
     def _apply_line(self, idx):
         ln = self._lines[idx]
         self._line_text = ln.text
+        self._line_is_japanese = _is_japanese(ln.text)
 
         # 逐字行输出 word 列表；行级歌词整行一个 word，但 wordTiming=false
-        # （QML 据此关闭卡拉OK填充，避免整行被误扫）
+        # （QML 据此关闭卡拉OK填充，避免整行被误扫）。
+        # ruby 为日语振假名，只有 QQ QRC 的 [kana:] 会给，其余恒为空串。
         if ln.words:
             self._words = [
-                {"text": w.text, "startMs": w.start_ms, "endMs": w.end_ms}
+                {"text": w.text, "startMs": w.start_ms, "endMs": w.end_ms,
+                 "ruby": w.ruby or ""}
                 for w in ln.words
             ]
             self._word_timing = True
         else:
-            self._words = [{"text": ln.text, "startMs": ln.start_ms, "endMs": ln.end_ms}]
+            self._words = [{"text": ln.text, "startMs": ln.start_ms,
+                            "endMs": ln.end_ms, "ruby": ""}]
             self._word_timing = False
 
         # 副行可选：翻译（没有则下一行 / 没有则不显示）、下一行、或不显示。
@@ -474,6 +502,7 @@ class LyricsBackend(QObject):
         if not self._line_text and not self._words and not self._sub_line:
             return
         self._line_text = ""
+        self._line_is_japanese = False
         self._words = []
         self._word_timing = False
         self._sub_line = ""
