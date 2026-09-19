@@ -351,7 +351,7 @@ def main():
         return 1
     print("furigana: switch card present, on by default, persists to config", flush=True)
 
-    # 炫酷动画开关卡：默认开、点击后写回配置（关掉后歌词组件回落轻量淡入）
+    # 换行与换歌动画开关卡：默认开、点击后写回配置（关掉后歌词组件回落轻量淡入）
     anim_card = find_object("lyricAnimationCard")
     if anim_card is None:
         print("FAIL: lyricAnimationCard missing", flush=True)
@@ -364,7 +364,7 @@ def main():
         return 1
     anim_switch = anim_switch[0]
     if not anim_switch.property("checked"):
-        print("FAIL: 炫酷动画 should default to on", flush=True)
+        print("FAIL: 换行与换歌动画 should default to on", flush=True)
         return 1
     # 同振假名：必须模拟鼠标点击才能走到 onToggled 的真实写回路径
     center = anim_switch.property("width") / 2.0

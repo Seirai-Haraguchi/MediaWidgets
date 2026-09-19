@@ -510,8 +510,8 @@ FluentPage {
                 objectName: "lyricAnimationCard"
                 Layout.fillWidth: true
                 icon.name: "ic_fluent_slide_transition_20_regular"
-                title: qsTr("炫酷动画")
-                description: qsTr("开启后，歌词换行时文字从下方大幅滑入并回弹，换歌时整块内容横扫切换。关闭则回落到轻量淡入。")
+                title: qsTr("换行与换歌动画")
+                description: qsTr("开启后，歌词换行时逐词错峰从下方滑入并回弹，切换歌曲时整块内容横扫过渡。关闭则回落为轻量淡入。")
 
                 Switch {
                     checked: root.config("lyric_animation_enabled", true)

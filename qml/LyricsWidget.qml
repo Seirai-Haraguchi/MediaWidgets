@@ -208,7 +208,7 @@ Widget {
     readonly property bool furiganaEnabled: pluginConfig
                                            ? pluginConfig.lyric_furigana_enabled !== false
                                            : true
-    // 炫酷动画总开关：关闭后行切换 / 换歌回落到轻量淡入（低配机器或不喜欢大幅动效）
+    // 换行 / 换歌动画总开关：关闭后回落到轻量淡入（低配机器或不喜欢大幅动效）
     readonly property bool lyricAnimationsEnabled: pluginConfig
                                                    ? pluginConfig.lyric_animation_enabled !== false
                                                    : true
@@ -242,7 +242,7 @@ Widget {
     //      否则同行主字会参差——与振假名占位同一条铁律）
     // 逐词与扫掠都由 lineSweepPulse 驱动：它是一条 0→1 的归一化进度，
     // Connections.onLineChanged 重新 start() 时会把所有从属动画一并归零重启。
-    // 关闭「炫酷动画」时 pulseDuration 变成 1ms 且入场进度立刻归 1，
+    // 关闭「换行与换歌动画」时 pulseDuration 变成 1ms 且入场进度立刻归 1，
     // 各层瞬间落到终态，等价于旧版的纯淡入行为。
     property real lineSweepPulse: 1
 

@@ -246,13 +246,13 @@
     </message>
     <message>
         <location filename="../qml/MediaWidgetsSettings.qml" line="513"/>
-        <source>炫酷动画</source>
-        <translation>Flashy animations</translation>
+        <source>换行与换歌动画</source>
+        <translation>Line &amp; Song Transition Animation</translation>
     </message>
     <message>
         <location filename="../qml/MediaWidgetsSettings.qml" line="514"/>
-        <source>开启后，歌词换行时文字从下方大幅滑入并回弹，换歌时整块内容横扫切换。关闭则回落到轻量淡入。</source>
-        <translation>When on, lyric lines slide in from below with a large bounce, and the whole content sweeps across when the song changes. Turn off to fall back to a subtle fade.</translation>
+        <source>开启后，歌词换行时逐词错峰从下方滑入并回弹，切换歌曲时整块内容横扫过渡。关闭则回落为轻量淡入。</source>
+        <translation>When on, lyric lines slide in word by word from below with a bounce, and switching songs sweeps the whole block sideways. When off, both fall back to a light fade.</translation>
     </message>
     <message>
         <location filename="../qml/MediaWidgetsSettings.qml" line="531"/>

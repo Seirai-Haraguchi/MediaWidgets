@@ -1038,7 +1038,7 @@ def main():
         return 1
     print("animation: 换行动画自动收尾（词归位、高光隐藏、整行缩放复位）", flush=True)
 
-    # 关掉「炫酷动画」→ 各层直接落到终态，等价旧版轻量淡入
+    # 关掉「换行与换歌动画」→ 各层直接落到终态，等价旧版轻量淡入
     configs.set_pref("lyric_animation_enabled", False)
     _wait(120)
     backend.set_line(
@@ -1050,12 +1050,12 @@ def main():
     off_y = _delegate_y(2)
     off_s = _delegate_scale(2)
     if abs(off_y) > 0.01 or abs(off_s - 1.0) > 0.001:
-        print(f"FAIL: 关闭炫酷动画后不应有入场位移/缩放，got y={off_y} scale={off_s}")
+        print(f"FAIL: 关闭换行与换歌动画后不应有入场位移/缩放，got y={off_y} scale={off_s}")
         return 1
     if highlight.property("visible"):
-        print("FAIL: 关闭炫酷动画后扫掠高光必须不出现")
+        print("FAIL: 关闭换行与换歌动画后扫掠高光必须不出现")
         return 1
-    print("animation: 关闭炫酷动画后回落到无位移的轻量淡入", flush=True)
+    print("animation: 关闭换行与换歌动画后回落到无位移的轻量淡入", flush=True)
     configs.set_pref("lyric_animation_enabled", True)
     _wait(120)
 

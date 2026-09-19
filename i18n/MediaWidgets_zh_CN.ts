@@ -246,13 +246,13 @@
     </message>
     <message>
         <location filename="../qml/MediaWidgetsSettings.qml" line="513"/>
-        <source>炫酷动画</source>
-        <translation>炫酷动画</translation>
+        <source>换行与换歌动画</source>
+        <translation>换行与换歌动画</translation>
     </message>
     <message>
         <location filename="../qml/MediaWidgetsSettings.qml" line="514"/>
-        <source>开启后，歌词换行时文字从下方大幅滑入并回弹，换歌时整块内容横扫切换。关闭则回落到轻量淡入。</source>
-        <translation>开启后，歌词换行时文字从下方大幅滑入并回弹，换歌时整块内容横扫切换。关闭则回落到轻量淡入。</translation>
+        <source>开启后，歌词换行时逐词错峰从下方滑入并回弹，切换歌曲时整块内容横扫过渡。关闭则回落为轻量淡入。</source>
+        <translation>开启后，歌词换行时逐词错峰从下方滑入并回弹，切换歌曲时整块内容横扫过渡。关闭则回落为轻量淡入。</translation>
     </message>
     <message>
         <location filename="../qml/MediaWidgetsSettings.qml" line="531"/>

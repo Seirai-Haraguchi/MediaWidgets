@@ -246,13 +246,13 @@
     </message>
     <message>
         <location filename="../qml/MediaWidgetsSettings.qml" line="513"/>
-        <source>炫酷动画</source>
-        <translation>派手なアニメーション</translation>
+        <source>换行与换歌动画</source>
+        <translation>行送り・曲切り替えアニメーション</translation>
     </message>
     <message>
         <location filename="../qml/MediaWidgetsSettings.qml" line="514"/>
-        <source>开启后，歌词换行时文字从下方大幅滑入并回弹，换歌时整块内容横扫切换。关闭则回落到轻量淡入。</source>
-        <translation>オンにすると、歌詞の行が切り替わるたびに文字が下から大きくスライドインして跳ね返り、曲の切り替え時は内容全体が横にスワイプします。オフにすると軽いフェードに戻ります。</translation>
+        <source>开启后，歌词换行时逐词错峰从下方滑入并回弹，切换歌曲时整块内容横扫过渡。关闭则回落为轻量淡入。</source>
+        <translation>オンにすると、歌詞の行送り時に語ごとに時間差で下からスライドインして跳ね返り、曲の切り替え時は内容全体が横に流れて遷移します。オフにすると軽いフェードに戻ります。</translation>
     </message>
     <message>
         <location filename="../qml/MediaWidgetsSettings.qml" line="531"/>
