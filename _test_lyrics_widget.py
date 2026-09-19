@@ -285,6 +285,7 @@ class StubConfigs(QObject):
             "lyric_gradient_intensity": 100,
             "lyric_subtitle_content": "translation_or_next",
             "lyric_furigana_enabled": True,
+            "lyric_animation_enabled": True,
         }
 
     def set_pref(self, key, value):
@@ -936,6 +937,203 @@ def main():
          {"text": "周杰伦", "startMs": 2600, "endMs": 3800, "ruby": ""}],
         True, "Sunny day", japanese=False)
     _wait(100)
+
+    # ---- 换行 / 换歌动画（大幅度动效） ----
+    # 旧实现换行只有 opacity 0.35→1（260ms），用户反馈「看不出换行」。
+    # 新实现由 root.lineSweepPulse（0→1 归一化进度）驱动三层可见效果：
+    #   a) 每个词从下方行高的 34% 处、1.32 倍缩放入场，走过冲回弹
+    #   b) sweepRow 整体做一次 1.05 倍呼吸缩放（整行统一，不逐词算）
+    #   c) 一条横向扫掠高光从左扫到右
+    # 断言必须打在**真实判据**上：只有断言 delegate 的 y / scale，以及
+    # sweepRow.scale、高光 rect 的 visible，才能在实现被换回旧版时 FAIL。
+    # 断言 root.lineSweepPulse 本身是不够的（旧版没这个属性，会是 None 而假绿/假红）。
+    backend.set_state("ready")
+    backend.set_line(
+        [{"text": "晴", "startMs": 1000, "endMs": 1600, "ruby": ""},
+         {"text": "天", "startMs": 1600, "endMs": 2600, "ruby": ""},
+         {"text": "好", "startMs": 2600, "endMs": 3800, "ruby": ""}],
+        True, "", japanese=False)
+    _wait(400)
+    sweep = _find_sweep()
+    row = _find_wordrow()
+    rep = next(o for o in row.findChildren(QObject)
+               if o.metaObject().className().startswith("QQuickRepeater"))
+
+    def _delegate_y(i):
+        # 位移走 transform（Row 会重设子项 y，直接写 y 属性会被无声吃掉）
+        d, _ = QQmlExpression(engine.rootContext(), rep, f"itemAt({i})").evaluate()
+        ty, _ = QQmlExpression(engine.rootContext(), d, "transform[0].y").evaluate()
+        return float(ty) if ty is not None else 0.0
+
+    def _delegate_scale(i):
+        d, _ = QQmlExpression(engine.rootContext(), rep, f"itemAt({i})").evaluate()
+        return float(d.property("scale") or 1)
+
+    # 静息态：动画播完后所有词必须精确归位，斜着的字不能留在屏幕上
+    for i in range(3):
+        if abs(_delegate_y(i)) > 0.01 or abs(_delegate_scale(i) - 1.0) > 0.001:
+            print(f"FAIL: 换行动画播完后 word{i} 必须回到 y=0 / scale=1，"
+                  f"got y={_delegate_y(i)} scale={_delegate_scale(i)}")
+            return 1
+    if abs(float(sweep.property("scale")) - 1.0) > 0.001:
+        print(f"FAIL: 换行动画播完后 sweepRow.scale 必须为 1，"
+              f"got {sweep.property('scale')}")
+        return 1
+    print("animation: 换行动画播完后逐词与整行精确归位（y=0 / scale=1）", flush=True)
+
+    # 换行瞬间：重新触发一条新行，立刻采样入场中间态。
+    # 这里不能用 app.processEvents()——它不推进 QAbstractAnimation 的时钟，
+    # 动画进度会停在 0，位移自然也是 0（假 FAIL）。用 _wait 让事件循环真正跑起来。
+    backend.set_line(
+        [{"text": "雨", "startMs": 0, "endMs": 600, "ruby": ""},
+         {"text": "还", "startMs": 600, "endMs": 1200, "ruby": ""},
+         {"text": "下", "startMs": 1200, "endMs": 1800, "ruby": ""}],
+        True, "", japanese=False)
+    _wait(90)
+
+    pulse_mid, _ = QQmlExpression(engine.rootContext(), root, "lineSweepPulse").evaluate()
+    if pulse_mid is None or float(pulse_mid) <= 0.0 or float(pulse_mid) >= 0.999:
+        print(f"FAIL: 换行瞬间 lineSweepPulse 应处于 0→1 之间，got {pulse_mid}"
+              f"（换行没有重启动画进度）")
+        return 1
+
+    # 错峰：靠后的词 delay 更大 → 同一时刻入场进度更小 → 位移更大。
+    # 这条把「逐词错峰」与「整行一起动」区分开，是灵动感的关键。
+    y0, y1, y2 = _delegate_y(0), _delegate_y(1), _delegate_y(2)
+    if not (y0 <= y2 + 0.01 and y1 <= y2 + 0.01 and y2 > 0.05):
+        print(f"FAIL: 逐词应错峰入场且尚未归位，got y=[{y0:.2f}, {y1:.2f}, {y2:.2f}]"
+              f"（没有逐词错峰 = 整行一起淡入，缺灵动感）")
+        return 1
+    s2 = _delegate_scale(2)
+    if not (s2 > 1.02 and s2 < 1.5):
+        print(f"FAIL: 入场中的词应为放大态（约 1.32 起步），got scale={s2:.3f}")
+        return 1
+    sweep_scale, _ = QQmlExpression(engine.rootContext(), sweep, "scale").evaluate()
+    if sweep_scale is None or abs(float(sweep_scale) - 1.0) < 1e-6:
+        print(f"FAIL: 换行期间 sweepRow 应有整体呼吸缩放，got scale={sweep_scale}")
+        return 1
+    highlight = next((o for o in root.findChildren(QObject)
+                      if o.property("objectName") == "lineSweepHighlight"), None)
+    if highlight is None:
+        print("FAIL: 找不到换行扫掠高光 lineSweepHighlight")
+        return 1
+    if not highlight.property("visible"):
+        print("FAIL: 换行期间扫掠高光应可见")
+        return 1
+    print(f"animation: 逐词错峰入场 y=[{y0:.1f},{y1:.1f},{y2:.1f}] "
+          f"scale={s2:.2f}，整行呼吸 {float(sweep_scale):.3f}，扫掠高光可见", flush=True)
+
+    # 动画必须自然收尾，不能永久停在中间态
+    _wait(900)
+    for i in range(3):
+        if abs(_delegate_y(i)) > 0.01 or abs(_delegate_scale(i) - 1.0) > 0.001:
+            print(f"FAIL: 换行动画应自动收尾，word{i} 停在 y={_delegate_y(i)} "
+                  f"scale={_delegate_scale(i)}")
+            return 1
+    if highlight.property("visible"):
+        print("FAIL: 动画结束后扫掠高光必须隐藏")
+        return 1
+    if float(sweep.property("scale") or 1) != 1.0:
+        print("FAIL: 动画结束后整行缩放必须回到 1")
+        return 1
+    print("animation: 换行动画自动收尾（词归位、高光隐藏、整行缩放复位）", flush=True)
+
+    # 关掉「炫酷动画」→ 各层直接落到终态，等价旧版轻量淡入
+    configs.set_pref("lyric_animation_enabled", False)
+    _wait(120)
+    backend.set_line(
+        [{"text": "收", "startMs": 0, "endMs": 600, "ruby": ""},
+         {"text": "尾", "startMs": 600, "endMs": 1200, "ruby": ""},
+         {"text": "。", "startMs": 1200, "endMs": 1800, "ruby": ""}],
+        True, "", japanese=False)
+    _wait(90)
+    off_y = _delegate_y(2)
+    off_s = _delegate_scale(2)
+    if abs(off_y) > 0.01 or abs(off_s - 1.0) > 0.001:
+        print(f"FAIL: 关闭炫酷动画后不应有入场位移/缩放，got y={off_y} scale={off_s}")
+        return 1
+    if highlight.property("visible"):
+        print("FAIL: 关闭炫酷动画后扫掠高光必须不出现")
+        return 1
+    print("animation: 关闭炫酷动画后回落到无位移的轻量淡入", flush=True)
+    configs.set_pref("lyric_animation_enabled", True)
+    _wait(120)
+
+    # ---- 换歌整组件横扫 ----
+    # 后端 _on_song_changed 的第一件事是把 state 从 "ready" 归到 "idle"，随后立刻转
+    # loading。这条 ready → idle 的下降沿就是换歌信号（首次加载 / 重试 / 改歌词源都
+    # 不会从 ready 掉回 idle）。用户换歌时整块内容向右抖出、再从左侧大幅滑入。
+    backend.set_state("idle")
+    _wait(60)
+    backend.set_state("ready")
+    _wait(1200)
+    prev_ready, _ = QQmlExpression(engine.rootContext(), root, "previousState").evaluate()
+    if prev_ready != "ready":
+        print(f"FAIL: 换歌前置条件不满足，previousState 应为 ready，got {prev_ready}")
+        return 1
+    content_row = next((o for o in root.findChildren(QObject)
+                        if o.property("objectName") == "contentRow"), None)
+    if content_row is None:
+        # 桩布局里找不到时的兜底：换歌动画挂在 sweepRow 的父容器上
+        content_row = sweep.parent()
+    if content_row is None:
+        print("FAIL: 找不到换歌动画的目标容器")
+        return 1
+
+    # 位移走 transform：contentRow 有 anchors.left，锚点会覆盖 x 属性，
+    # 用 x 做位移动画会被静默吃掉（实测 songSlideX 在动、x 恒为 0）。
+    def _row_tx():
+        v, _ = QQmlExpression(engine.rootContext(), content_row, "transform[0].x").evaluate()
+        return float(v) if v is not None else 0.0
+
+    # idle → ready 只是就绪，不应播横扫（否则首次加载也会晃）
+    if abs(_row_tx()) > 0.01:
+        print(f"FAIL: ready（就绪）不应触发换歌横扫，got {_row_tx()}")
+        return 1
+
+    # 换歌：ready → idle（真后端 _on_song_changed 的第一步）
+    backend.set_state("idle")
+    _wait(70)
+    song_x = _row_tx()
+    song_op, _ = QQmlExpression(engine.rootContext(), content_row, "opacity").evaluate()
+    if abs(song_x) < 1.0:
+        sw, _ = QQmlExpression(engine.rootContext(), root, "songSweeping").evaluate()
+        print(f"FAIL: 换歌瞬间 contentRow 应有横向位移，got x={song_x}"
+              f"（换歌动画没有触发；songSweeping={sw} "
+              f"state={backend.property('state')}）")
+        return 1
+    if float(song_op) >= 1.0:
+        print(f"FAIL: 换歌瞬间 contentRow 应淡出，got opacity={song_op}")
+        return 1
+    print(f"animation: 换歌整块横扫 x={song_x:.1f} "
+          f"opacity={float(song_op):.2f}", flush=True)
+
+    backend.set_state("ready")
+    _wait(1200)
+    rest_x = _row_tx()
+    rest_op, _ = QQmlExpression(engine.rootContext(), content_row, "opacity").evaluate()
+    if abs(rest_x) > 0.01:
+        print(f"FAIL: 换歌动画结束后 contentRow 位移必须回 0，got {rest_x}")
+        return 1
+    if rest_op is None or abs(float(rest_op) - 1.0) > 0.001:
+        print(f"FAIL: 换歌动画结束后 contentRow.opacity 必须回 1，got {rest_op}")
+        return 1
+    sweeping_after, _ = QQmlExpression(engine.rootContext(), root, "songSweeping").evaluate()
+    if sweeping_after:
+        print("FAIL: 换歌动画结束后 songSweeping 必须复位，否则第二次换歌不再播放")
+        return 1
+    print("animation: 换歌横扫收尾后精确归位（位移=0 / opacity=1 / 标志复位）", flush=True)
+
+    # 改歌词源 / 重新抓取（ready → loading，不经过 idle）不应误播换歌动画
+    backend.set_state("loading")
+    _wait(70)
+    src_x = _row_tx()
+    if abs(src_x) > 0.01:
+        print(f"FAIL: ready→loading（改歌词源/重抓）不应触发换歌动画，got x={src_x}")
+        return 1
+    print("animation: 仅换歌触发整块横扫（改歌词源不误播）", flush=True)
+    backend.set_state("ready")
+    _wait(150)
 
     # ---- 真后端 × 真组件：间奏信号的时序契约 ----
     # 上面的间奏断言都走桩后端（set_interlude 先置位再 emit），因此掩盖了真后端

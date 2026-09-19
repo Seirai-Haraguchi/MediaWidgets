@@ -97,7 +97,7 @@ for catalog, items in samples.items():
         got = translated(catalog, context, source)
         check(f"{catalog}: {source!r}", got == expect, f"got {got!r}")
 
-# 每份目录 56 条，且 .ts 里没有遗留的 unfinished（lrelease 时无遗漏）
+# 每份目录 58 条，且 .ts 里没有遗留的 unfinished（lrelease 时无遗漏）
 for catalog in ("en_US", "zh_CN", "zh_TW", "ja_JP"):
     qm = I18N / f"MediaWidgets_{catalog}.qm"
     check(f"{catalog}.qm exists", qm.exists())
@@ -105,7 +105,7 @@ for catalog in ("en_US", "zh_CN", "zh_TW", "ja_JP"):
     unfinished = ts_text.count('type="unfinished"')
     check(f"{catalog}.ts fully translated", unfinished == 0,
           f"{unfinished} unfinished")
-    check(f"{catalog}.ts has 56 messages", ts_text.count("<source>") == 56,
+    check(f"{catalog}.ts has 58 messages", ts_text.count("<source>") == 58,
           f"{ts_text.count('<source>')} messages")
 
 print()

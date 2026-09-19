@@ -87,7 +87,11 @@ Widget {
         }
     }
     onShouldShowChanged: applyVisibility()
-    Component.onCompleted: actualVisible = shouldShow
+    Component.onCompleted: {
+        actualVisible = shouldShow
+        // 记录初始状态，作为「换歌」判定的起点（见 previousState 注释）
+        previousState = backend ? backend.state : ""
+    }
 
     // 入场：先归零一帧再淡入 / 轻微放大，避免原生出现造成生硬跳变
     SequentialAnimation {
@@ -204,6 +208,10 @@ Widget {
     readonly property bool furiganaEnabled: pluginConfig
                                            ? pluginConfig.lyric_furigana_enabled !== false
                                            : true
+    // 炫酷动画总开关：关闭后行切换 / 换歌回落到轻量淡入（低配机器或不喜欢大幅动效）
+    readonly property bool lyricAnimationsEnabled: pluginConfig
+                                                   ? pluginConfig.lyric_animation_enabled !== false
+                                                   : true
 
     // 卡拉OK双色：已唱满色、未唱半透明；主文字色不用专辑主色，保证任何封面下都可读
     readonly property color sungColor: Rin.Theme.isDark() ? "#FFFFFF" : "#1B1B1B"
@@ -223,11 +231,189 @@ Widget {
         easing.type: Easing.OutQuad
     }
 
+    // ---- 歌词行切换动画 ----
+    // 设计取向「炫酷 / 灵动 / 大幅度」：旧实现只有 260ms 的透明度 0.35→1，
+    // 幅度太小几乎看不出是一次换行。新实现把「一次换行」拆成四层同时发生：
+    //   1) 逐词错峰入场：每个词自带 delay，从下方 34% 行高、1.32 倍缩放入场，
+    //      速度归零回弹（opacity lerp 用同一 Easing.OutBack，避免迟到的词只是淡入）
+    //   2) 起步模糊：刚入场的词先上模糊再归零，给出「运动模糊」的速度感
+    //   3) 横向扫掠：一行高光从左到右扫过，划出换行方向
+    //   4) 整体呼吸：行内统一做一次轻微 overshoot 缩放（整行统一，不逐词算，
+    //      否则同行主字会参差——与振假名占位同一条铁律）
+    // 逐词与扫掠都由 lineSweepPulse 驱动：它是一条 0→1 的归一化进度，
+    // Connections.onLineChanged 重新 start() 时会把所有从属动画一并归零重启。
+    // 关闭「炫酷动画」时 pulseDuration 变成 1ms 且入场进度立刻归 1，
+    // 各层瞬间落到终态，等价于旧版的纯淡入行为。
+    property real lineSweepPulse: 1
+
+    // 进度驱动器：把 root.lineSweepPulse 从 0 缓动到 1。
+    // 注意 id 绝不能也叫 lineSweepPulse —— QML 里 id 的作用域优先级高于属性名，
+    // 同名会让函数体里的 lineSweepPulse 解析成这个动画对象（数字运算得到 NaN，
+    // 入场位移与缩放全部失效且不报任何错）。故 id 用 lineSweepPulseAnim。
+    NumberAnimation {
+        id: lineSweepPulseAnim
+        target: root
+        property: "lineSweepPulse"
+        from: 0
+        to: 1
+        duration: root.lyricAnimationsEnabled ? 760 : 1
+        easing.type: root.lyricAnimationsEnabled ? Easing.OutCubic : Easing.Linear
+    }
+
+    // 单词入场进度：delay 单位 ms，span 为单个词的入场时长
+    function wordEnterProgress(index, delay, span) {
+        if (!lyricAnimationsEnabled)
+            return 1
+        var elapsed = lineSweepPulse * lineSweepPulseDuration - delay
+        if (elapsed <= 0)
+            return 0
+        return Math.max(0, Math.min(1, elapsed / span))
+    }
+
+    // 速度归零的过冲缓出：用于逐词落地的回弹（约 1.7% 过冲后收回）
+    function easeOutBack(progress) {
+        var p = Math.max(0, Math.min(1, progress))
+        var factor = 1.70158
+        var shifted = p - 1
+        return 1 + (factor + 1) * Math.pow(shifted, 3)
+               + factor * Math.pow(shifted, 2)
+    }
+
+    readonly property int lineSweepPulseDuration: lyricAnimationsEnabled ? 760 : 1
+    // 逐词错峰间距：词多时自动压缩，整行入场不会拖到下一句都唱上了才播完
+    readonly property int wordStaggerMs: {
+        var n = (sweepRow.words && sweepRow.words.length) ? sweepRow.words.length : 1
+        return Math.max(24, Math.min(70, Math.round(520 / Math.max(1, n))))
+    }
+
+    // 换行扫掠高光：从左到右扫过整行，位置由 lineSweepPulse 驱动
+    Rectangle {
+        id: lineSweepHighlight
+        objectName: "lineSweepHighlight"
+        parent: root
+        visible: root.lyricAnimationsEnabled && root.lineSweepPulse < 1 && sweepRow.visible
+        width: Math.max(0, sweepRow.width)
+        height: 2
+        radius: 1
+        color: root.sungColor
+        opacity: visible ? 0.5 * Math.sin(Math.PI * Math.min(1, Math.max(0, root.lineSweepPulse))) : 0
+        x: sweepRow.x + (root.lyricAnimationsEnabled
+                         ? (root.lineSweepPulse * 2 - 1) * sweepRow.width
+                         : 0)
+        y: sweepRow.y + sweepRow.height / 2
+
+        Behavior on opacity {
+            NumberAnimation { duration: 90; easing.type: Easing.OutCubic }
+        }
+    }
+
+    // 换歌：整组件扫过——旧内容向右抖出，新内容从左侧大幅滑入，再回弹归位。
+    // 之所以放在 root 上而不是逐元素：换歌是「整块内容重来」，逐元素做反而碎。
+    // 不动 scale（规模外扩会顶到宿主布局），只用水平位移 + 透明度，
+    // 幅度取组件宽度的 22%，比换行长距离的滑入更明显。
+    SequentialAnimation {
+        id: songSweepAnim
+        NumberAnimation {
+            target: root
+            property: "songSlideX"
+            from: 0
+            to: root.lyricAnimationsEnabled ? root.width * 0.16 : 0
+            duration: root.lyricAnimationsEnabled ? 170 : 1
+            easing.type: Easing.InCubic
+        }
+        ParallelAnimation {
+            NumberAnimation {
+                target: root
+                property: "songSlideX"
+                from: root.lyricAnimationsEnabled ? root.width * 0.16 : 0
+                to: root.lyricAnimationsEnabled ? -root.width * 0.22 : 0
+                duration: root.lyricAnimationsEnabled ? 340 : 1
+                easing.type: Easing.OutCubic
+            }
+            NumberAnimation {
+                target: root
+                property: "songSlideOpacity"
+                from: root.lyricAnimationsEnabled ? 0.0 : 1
+                to: 1
+                duration: root.lyricAnimationsEnabled ? 340 : 1
+                easing.type: Easing.OutCubic
+            }
+        }
+        ParallelAnimation {
+            NumberAnimation {
+                target: root
+                property: "songSlideX"
+                from: root.lyricAnimationsEnabled ? -root.width * 0.22 : 0
+                to: 0
+                duration: root.lyricAnimationsEnabled ? 420 : 1
+                easing.type: Easing.OutBack
+            }
+            NumberAnimation {
+                target: root
+                property: "songSlideOpacity"
+                from: 1
+                to: 1
+                duration: root.lyricAnimationsEnabled ? 420 : 1
+            }
+        }
+        onFinished: {
+            // 必须显式复位：songSweeping 只在动画期间为 true，
+            // 否则下一次换歌的重入判定会一直被挡住（曾因此第二次换歌不再播放）。
+            root.songSweeping = false
+            root.songSlideX = 0
+            root.songSlideOpacity = 1
+        }
+    }
+
+    // 内容层水平位移与不透明度：仅供换歌动画驱动，静息值为 0 / 1
+    property real songSlideX: 0
+    property real songSlideOpacity: 1
+    property bool songSweeping: false
+
+    onLyricAnimationsEnabledChanged: {
+        // 关掉时把动画留下的中间态立刻归位，否则会停在歪斜/半透明上
+        if (!lyricAnimationsEnabled) {
+            songSweepAnim.stop()
+            songSweeping = false
+            songSlideX = 0
+            songSlideOpacity = 1
+            root.lineSweepPulse = 1
+        }
+    }
+
+    // 换歌识别：后端 _on_song_changed 的第一件事是把 state 从 "ready" 归到 "idle"
+    // （随后立刻转 loading）。这条 ready → idle 的**下降沿**就是换歌信号：
+    // 首次加载、重试、改歌词源都不会从 ready 掉到 idle，因此不会误播。
+    // 注意 previousState 存的是「本次 event 携带的新状态」，所以判定必须
+    // 在 previousState 变为 "idle" 时触发，而不是变为 "ready" 时。
+    property string previousState: ""
+    onPreviousStateChanged: {
+        if (previousState === "idle" && lastReadyState && root.lyricAnimationsEnabled) {
+            songSweepAnim.stop()
+            songSlideX = 0
+            songSlideOpacity = 0
+            songSweeping = true
+            songSweepAnim.start()
+        }
+        lastReadyState = (previousState === "ready")
+    }
+    // 上一次收到的状态是否为 ready；用来把 ready→idle 与「启动期的 idle」区分开
+    property bool lastReadyState: false
+
     Connections {
         target: root.backend
+        function onStateChanged() {
+            root.previousState = root.backend ? root.backend.state : ""
+        }
         function onLineChanged() {
             sweepRow.prepareLineChange()
-            linePop.restart()
+            if (root.lyricAnimationsEnabled) {
+                lineSweepPulseAnim.stop()
+                root.lineSweepPulse = 0
+                lineSweepPulseAnim.start()
+            } else {
+                linePop.restart()
+            }
         }
     }
 
@@ -255,12 +441,20 @@ Widget {
 
     // 主内容：当前行 | 副行（dynamicNotification 的行内双文本模式）
     // 与 MediaWidget 相同：不能锚定右侧，内容行自然撑开组件宽度，超上限由框架裁切兜底
+    // 注意：contentRow 有 anchors.left，锚点会**覆盖 x 属性**，写 x 做位移动画无效。
+    // 换歌横扫必须走 transform（锚点管不到 transform），与逐词入场的位移同一处理。
     RowLayout {
         id: contentRow
+        objectName: "contentRow"
         anchors.left: parent.left
         anchors.verticalCenter: parent.verticalCenter
         spacing: 8
         visible: root.shouldShow
+
+        // 换歌时整块内容横扫：translate 位移 + 淡入，静息时回到 0 / 1，对常规布局零影响。
+        // 不用 x / width / height —— 锚点会吃掉 x，而宽度受框架收窄逻辑约束，都不参与动画。
+        opacity: root.songSlideOpacity
+        transform: Translate { x: root.songSlideX }
 
         // 当前行：状态文案 与 逐字扫描 二选一，同为 Title 标尺
         // 状态文案用框架 Title（CW2 内置组件的占位写法，如 Nothing right now）
@@ -282,6 +476,9 @@ Widget {
             color: root.unsungColor
         }
 
+        // 换行时字从下方大幅滑入（幅度大、回弹足），旧版只有 0.35→1 的淡入。
+        // contentRow 是 verticalCenter：这里给 WordSweep 加位移不会改变行高，
+        // 副行与那条 2px 分隔线不会被带着走（与「隐藏只归零宽度、绝不归零高度」同一约束）。
         WordSweep {
             id: sweepRow
             visible: !statusText.visible && !root.interludeActive
@@ -306,6 +503,23 @@ Widget {
             furiganaEnabled: root.furiganaEnabled
             japaneseFontFamily: root.japaneseFontFamily
             japaneseFontWeight: root.japaneseFontWeight
+
+            // 整体呼吸缩放：整行一个值（取自算力最省的「全行入场均值」），
+            // 不逐词算——逐词缩放会让同行各词大小不一，观感像渲染错误。
+            // 换行后只做一次 1.05 → 1 的回落，随后恒为 1，不影响卡拉OK 扫描。
+            // 注意：不能用 baseText.height（首帧还未布局，会得到 NaN 并把整个
+            // delegate 的 scale 污染成 NaN，入场动画直接消失）。
+            readonly property real lineEnterScale: {
+                if (root.lineSweepPulse >= 1)
+                    return 1
+                if (!root.lyricAnimationsEnabled)
+                    return 1
+                var p = root.lineSweepPulse
+                // 起步略过冲再回落，给出「弹一下」的灵动感
+                return 1 + 0.05 * Math.sin(Math.PI * Math.min(1, p * 1.15))
+            }
+            transformOrigin: Item.Center
+            scale: lineEnterScale
         }
 
         // 间奏：三个呼吸点占住主行的位置，间奏结束后换回下一句歌词
@@ -525,6 +739,25 @@ Widget {
                     readonly property real rubyHeight: sweep.lineReservedRuby
                     implicitWidth: baseText.width
                     implicitHeight: rubyHeight + baseText.height
+
+                    // ---- 换行逐词入场（「炫酷 / 灵动 / 大幅度」的核心） ----
+                    // 每个词自带 delay 错峰入场，位移取行高的 34%，缩放 1.32 → 1
+                    // 走过冲回弹；两者都只在换行后的 760ms 内变化，随后恒为终态，
+                    // 不影响卡拉OK 填充与跑马灯。
+                    // 位移必须走 transform，不能写 `y:` —— delegate 是 Row 的子项，
+                    // Row 的布局每次都会把 y 重设回 0，直接写 y 属性会被无声吃掉。
+                    readonly property real enterProgress: root.wordEnterProgress(
+                        index, index * root.wordStaggerMs, 460)
+                    // 越靠后的词错峰越晚，用同一 Easing.OutBack 做一次速度归零的落地，
+                    // 否则「迟到的词」看起来只是淡入，没有冲进来的感觉
+                    readonly property real enterEased: root.easeOutBack(enterProgress)
+                    // 位移幅度取字号比例而非 baseText.height：后者在首帧仍是 NaN
+                    readonly property real enterTranslateY: (1 - enterEased) * sweep.pixelSize * 0.95
+                    readonly property real enterScale: 1 + (1 - enterEased) * 0.32
+
+                    transformOrigin: Item.Bottom
+                    scale: enterScale
+                    transform: Translate { y: wordItem.enterTranslateY }
 
                     // 已唱比例：无逐字时间戳时整词点亮；有则词内线性推进
                     readonly property real fillRatio: {

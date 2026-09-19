@@ -505,6 +505,21 @@ FluentPage {
                 }
             }
 
+            // 大幅度动效开关：行切换（逐词错峰 + 回弹 + 扫掠）与换歌（整块横扫）
+            SettingCard {
+                objectName: "lyricAnimationCard"
+                Layout.fillWidth: true
+                icon.name: "ic_fluent_slide_transition_20_regular"
+                title: qsTr("炫酷动画")
+                description: qsTr("开启后，歌词换行时文字从下方大幅滑入并回弹，换歌时整块内容横扫切换。关闭则回落到轻量淡入。")
+
+                Switch {
+                    checked: root.config("lyric_animation_enabled", true)
+                    onToggled: Configs.setPlugin(root.pluginId,
+                                                  "lyric_animation_enabled", checked)
+                }
+            }
+
             // 歌词字体：每一类歌词各用一张标准 RinUI 设置卡
             // （标题 + 说明 + 字体/字重选择器），与本页其它设置卡结构一致。
             // 早前用 SettingExpander + SettingItem，宿主里只看得见两个下拉框、

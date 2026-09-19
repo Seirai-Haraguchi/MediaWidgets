@@ -36,6 +36,9 @@ class MediaWidgetsConfig(ConfigBaseModel):
     # 日语歌词振假名（ruby）显示开关；无假名数据时自动隐藏
     lyric_furigana_enabled: bool = True
 
+    # 歌词行切换 / 换歌的大幅度动画开关；关闭后回落到轻量淡入
+    lyric_animation_enabled: bool = True
+
     # 歌词字体：空字符串 / 0 表示跟随全局主界面字体与字重
     lyric_font_original: str = ""
     lyric_font_weight_original: int = 0

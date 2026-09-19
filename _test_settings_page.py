@@ -351,6 +351,39 @@ def main():
         return 1
     print("furigana: switch card present, on by default, persists to config", flush=True)
 
+    # 炫酷动画开关卡：默认开、点击后写回配置（关掉后歌词组件回落轻量淡入）
+    anim_card = find_object("lyricAnimationCard")
+    if anim_card is None:
+        print("FAIL: lyricAnimationCard missing", flush=True)
+        return 1
+    anim_switch = [c for c in anim_card.findChildren(QObject)
+                   if "Switch" in c.metaObject().className()]
+    if len(anim_switch) != 1:
+        print(f"FAIL: lyricAnimationCard should host exactly 1 Switch, "
+              f"got {len(anim_switch)}", flush=True)
+        return 1
+    anim_switch = anim_switch[0]
+    if not anim_switch.property("checked"):
+        print("FAIL: 炫酷动画 should default to on", flush=True)
+        return 1
+    # 同振假名：必须模拟鼠标点击才能走到 onToggled 的真实写回路径
+    center = anim_switch.property("width") / 2.0
+    mid = anim_switch.property("height") / 2.0
+    press = QMouseEvent(QEvent.Type.MouseButtonPress, QPointF(center, mid),
+                        QPointF(0, 0), Qt.MouseButton.LeftButton,
+                        Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+    release = QMouseEvent(QEvent.Type.MouseButtonRelease, QPointF(center, mid),
+                          QPointF(0, 0), Qt.MouseButton.LeftButton,
+                          Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier)
+    QCoreApplication.sendEvent(anim_switch, press)
+    QCoreApplication.sendEvent(anim_switch, release)
+    app.processEvents()
+    if configs.written.get("lyric_animation_enabled") is not False:
+        print(f"FAIL: animation switch did not persist on click, "
+              f"written={configs.written}", flush=True)
+        return 1
+    print("animation: switch card present, on by default, persists to config", flush=True)
+
     # 图标名必须存在于 RinUI 字体图标索引（缺失即页面“缺图标”）
     icon_names = [
         "ic_fluent_music_note_2_20_regular",
@@ -370,6 +403,7 @@ def main():
         "ic_fluent_subtitles_20_regular",
         "ic_fluent_local_language_20_regular",
         "ic_fluent_text_font_20_regular",
+        "ic_fluent_slide_transition_20_regular",
     ]
     index_js = (
         RINUI_QML_DIR / "RinUI" / "assets" / "fonts" / "FluentSystemIcons-Index.js"

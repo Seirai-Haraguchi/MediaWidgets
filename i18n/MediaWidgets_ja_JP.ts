@@ -4,32 +4,32 @@
 <context>
     <name>LyricsWidget</name>
     <message>
-        <location filename="../qml/LyricsWidget.qml" line="170"/>
+        <location filename="../qml/LyricsWidget.qml" line="174"/>
         <source>跟随全局字体</source>
         <translation>全体フォントに従う</translation>
     </message>
     <message>
-        <location filename="../qml/LyricsWidget.qml" line="213"/>
+        <location filename="../qml/LyricsWidget.qml" line="221"/>
         <source>Lyrics</source>
         <translation>歌詞</translation>
     </message>
     <message>
-        <location filename="../qml/LyricsWidget.qml" line="274"/>
+        <location filename="../qml/LyricsWidget.qml" line="468"/>
         <source>未在播放</source>
         <translation>未再生</translation>
     </message>
     <message>
-        <location filename="../qml/LyricsWidget.qml" line="276"/>
+        <location filename="../qml/LyricsWidget.qml" line="470"/>
         <source>正在获取歌词…</source>
         <translation>歌詞を取得中…</translation>
     </message>
     <message>
-        <location filename="../qml/LyricsWidget.qml" line="277"/>
+        <location filename="../qml/LyricsWidget.qml" line="471"/>
         <source>未找到这首歌的歌词</source>
         <translation>この曲の歌詞が見つかりませんでした</translation>
     </message>
     <message>
-        <location filename="../qml/LyricsWidget.qml" line="278"/>
+        <location filename="../qml/LyricsWidget.qml" line="472"/>
         <source>歌词获取失败</source>
         <translation>歌詞の取得に失敗しました</translation>
     </message>
@@ -245,58 +245,68 @@
         <translation>日本語歌詞の漢字の上に平仮名のルビを表示します。歌詞ソースが読みデータを提供する場合（QQ 音楽）のみ表示されます。</translation>
     </message>
     <message>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="516"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="513"/>
+        <source>炫酷动画</source>
+        <translation>派手なアニメーション</translation>
+    </message>
+    <message>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="514"/>
+        <source>开启后，歌词换行时文字从下方大幅滑入并回弹，换歌时整块内容横扫切换。关闭则回落到轻量淡入。</source>
+        <translation>オンにすると、歌詞の行が切り替わるたびに文字が下から大きくスライドインして跳ね返り、曲の切り替え時は内容全体が横にスワイプします。オフにすると軽いフェードに戻ります。</translation>
+    </message>
+    <message>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="531"/>
         <source>原文歌词字体</source>
         <translation>原文歌詞のフォント</translation>
     </message>
     <message>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="517"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="532"/>
         <source>显示原文歌词时使用的字体和字重。选择「跟随全局字体」时，使用全局字体设置中的主界面字体。</source>
         <translation>原文歌詞の表示に使うフォントとウェイトです。「全体フォントに従う」を選ぶと、全体フォント設定のメインフォントを使用します。</translation>
     </message>
     <message>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="523"/>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="575"/>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="627"/>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="679"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="538"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="590"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="642"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="694"/>
         <source>字体</source>
         <translation>フォント</translation>
     </message>
     <message>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="545"/>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="597"/>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="649"/>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="701"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="560"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="612"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="664"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="716"/>
         <source>字重</source>
         <translation>ウェイト</translation>
     </message>
     <message>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="568"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="583"/>
         <source>译文歌词字体</source>
         <translation>訳詞のフォント</translation>
     </message>
     <message>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="569"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="584"/>
         <source>显示译文歌词时使用的字体和字重。该行没有译文而回退显示原文时，仍按原文歌词的字体设置渲染。</source>
         <translation>訳詞の表示に使うフォントとウェイトです。その行に訳詞がなく原文を表示する場合は、原文歌詞のフォント設定で描画します。</translation>
     </message>
     <message>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="620"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="635"/>
         <source>罗马音歌词字体</source>
         <translation>ローマ字歌詞のフォント</translation>
     </message>
     <message>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="621"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="636"/>
         <source>显示罗马音歌词时使用的字体和字重。选择「跟随全局字体」时，使用全局字体设置中的主界面字体。</source>
         <translation>ローマ字歌詞の表示に使うフォントとウェイトです。「全体フォントに従う」を選ぶと、全体フォント設定のメインフォントを使用します。</translation>
     </message>
     <message>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="672"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="687"/>
         <source>日语歌词字体</source>
         <translation>日本語歌詞のフォント</translation>
     </message>
     <message>
-        <location filename="../qml/MediaWidgetsSettings.qml" line="673"/>
+        <location filename="../qml/MediaWidgetsSettings.qml" line="688"/>
         <source>显示日语歌词（含假名注音）时使用的字体和字重，仅对含假名的歌词行生效。选择「跟随全局字体」时，使用全局字体设置中的主界面字体。</source>
         <translation>日本語歌詞（ルビを含む）の表示に使うフォントとウェイト。仮名を含む歌詞行にのみ適用されます。「全体フォントに従う」を選ぶと、全体フォント設定のメインフォントを使用します。</translation>
     </message>
