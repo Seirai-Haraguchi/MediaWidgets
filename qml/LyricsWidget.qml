@@ -56,15 +56,30 @@ Widget {
         return isNaN(value) ? 1.0 : Math.max(0, Math.min(100, value)) / 100
     }
 
-    // 有可用歌词 / 正在搜索 / 编辑模式 → 显示；nomatch/error/idle 才隐藏
-    // loading 不算「无歌词」，防止搜索过程中组件闪烁消失
-    readonly property bool lyricsUsable: backend && backend.state === "ready"
-    readonly property bool lyricsLoading: backend && backend.state === "loading"
+    // 有可用歌词 / 正在搜索 / 编辑模式 → 显示；nomatch/error 才隐藏。
+    // loading 不算「无歌词」，防止搜索过程中组件闪烁消失。
+    // 判据读 observedState 而不是 backend.state：换歌那一瞬的 idle 是切曲的中间态，
+    // 由 observeState 与 songTransitionHold 一起并入（详见该函数注释）——
+    // 否则整组件会在换歌瞬间先播一次退场淡出，把横扫动画整个盖掉。
+    // hold 必须再与 hasMedia 相与：播放器停止时后端同样走 ready → idle，
+    // 只认 hold 会让组件卡在「未在播放」上不消失（正常该隐藏）。
+    readonly property bool lyricsUsable: observedState === "ready"
+    readonly property bool lyricsLoading: observedState === "loading"
     readonly property bool shouldShow: lyricsUsable || lyricsLoading || editMode
+                                       || (songTransitionHold && hasMedia)
 
     // 当前是否处于间奏：主行换成呼吸点（后端只在「有文档且落在长空档内」时为真）
     readonly property bool interludeActive: backend !== null
-                                            && backend.state === "ready" && backend.interlude
+                                            && observedState === "ready" && backend.interlude
+
+    // 主行是否走「状态文案」而不是歌词。
+    // 换歌的「送出」窗口内刻意不走 —— 那一瞬 observedState 会落到 idle / loading，
+    // 若照它显示「正在获取歌词…」，刚起步的送出动画会被一行状态文案当场顶掉，
+    // 等于看不到歌词滑出（这正是「切歌动画看不见」的另一半原因）。
+    // 送出播完（songSweepingOut 落下）才把状态文案顶上来，覆盖住等新歌词的空档。
+    readonly property bool statusTextActive: !backend
+                                             || (observedState !== "ready"
+                                                 && !songSweepingOut)
 
     // 隐藏行为对齐 CW2 动态通知组件的空状态：组件始终留在宿主组件列表里
     // （注册、顺序、位置、配置都原样保留），只是宽度归零 + 不可见，
@@ -89,8 +104,6 @@ Widget {
     onShouldShowChanged: applyVisibility()
     Component.onCompleted: {
         actualVisible = shouldShow
-        // 记录初始状态，作为「换歌」判定的起点（见 previousState 注释）
-        previousState = backend ? backend.state : ""
     }
 
     // 入场：先归零一帧再淡入 / 轻微放大，避免原生出现造成生硬跳变
@@ -217,203 +230,515 @@ Widget {
     readonly property color sungColor: Rin.Theme.isDark() ? "#FFFFFF" : "#1B1B1B"
     readonly property color unsungColor: Rin.Theme.isDark() ? Qt.alpha("#FFFFFF", 0.40) : Qt.alpha("#000000", 0.40)
 
-    // header 副标题与 MediaWidget 同位置：有媒体显歌名，无媒体显组件名
-    text: backend && hasMedia ? media.title : qsTr("Lyrics")
+    // 顶部歌名：框架只暴露 `text` 别名（property alias text: subtitleLabel.text），
+    // 拿不到那个 Text 实例，也就无法给它挂位移 / 淡入淡出。
+    // 所以框架标题留空，真歌名改到 `subtitle` 槽位自绘 —— 与 CW2 内置的
+    // dynamicNotification.qml 完全同款写法（subtitle: Subtitle { ... }），
+    // 直接复用框架 Subtitle 组件，字号 / 字重 / 主题覆写都自动跟随。
+    //
+    // 为什么留空串也不会让 header 行消失：BaseWidget 的判据是
+    //     visible: (subtitle.length > 1 || actions.length > 1 || text.length > 0) && !miniMode
+    // 往 subtitle 槽位加一项后 subtitle.length 变成 2，前一个分支已成立。
+    // 空串的 subtitleLabel 宽度为 0，不占横向空间、行高也与原来一致。
+    text: ""
 
-    // 换行时轻微淡入，突出逐字扫描主体
+    // 自绘歌名：位移 / 不透明度直接挂在 Subtitle 上。
+    // 切勿再套一层 Item 外壳 —— subtitle 是 subtitleArea.children 的**列表别名**，
+    // 外壳会让槽位里多出一层容器，布局与对齐都会跟着漂（内置组件都是直挂）。
+    subtitle: Subtitle {
+        id: headerLabel
+        objectName: "headerLabel"
+        text: root.backend && root.hasMedia ? root.media.title : qsTr("Lyrics")
+        // 框架 Subtitle 自带 opacity: 0.6，这里在它之上叠换歌的淡出淡入
+        opacity: 0.6 * root.songOpacity
+        // 换歌横扫：与下方歌词块同一套位移，歌名与歌词一起非线性平移
+        transform: Translate { x: root.songSlideX }
+    }
+
+    // 换行时轻微淡入，突出逐字扫描主体。
+    // 目标是 root 上的独立属性而不是 sweepRow.opacity —— 后者现在由
+    // lyricOpacity 统一合成，直接对其做动画会与绑定打架。
+    property real linePopOpacity: 1
     NumberAnimation {
         id: linePop
-        target: sweepRow
-        property: "opacity"
+        target: root
+        property: "linePopOpacity"
         from: 0.35
         to: 1
         duration: 260
         easing.type: Easing.OutQuad
     }
 
-    // ---- 歌词行切换动画 ----
-    // 设计取向「炫酷 / 灵动 / 大幅度」：旧实现只有 260ms 的透明度 0.35→1，
-    // 幅度太小几乎看不出是一次换行。新实现把「一次换行」拆成四层同时发生：
-    //   1) 逐词错峰入场：每个词自带 delay，从下方 34% 行高、1.32 倍缩放入场，
-    //      速度归零回弹（opacity lerp 用同一 Easing.OutBack，避免迟到的词只是淡入）
-    //   2) 起步模糊：刚入场的词先上模糊再归零，给出「运动模糊」的速度感
-    //   3) 横向扫掠：一行高光从左到右扫过，划出换行方向
-    //   4) 整体呼吸：行内统一做一次轻微 overshoot 缩放（整行统一，不逐词算，
-    //      否则同行主字会参差——与振假名占位同一条铁律）
-    // 逐词与扫掠都由 lineSweepPulse 驱动：它是一条 0→1 的归一化进度，
-    // Connections.onLineChanged 重新 start() 时会把所有从属动画一并归零重启。
-    // 关闭「换行与换歌动画」时 pulseDuration 变成 1ms 且入场进度立刻归 1，
-    // 各层瞬间落到终态，等价于旧版的纯淡入行为。
-    property real lineSweepPulse: 1
+    // ---- 歌词块动画 ----
+    // 设计取向「炫酷 / 灵动 / 大幅度」。换行与换歌是两套方向不同的运动：
+    //   换行：旧行整体上抬淡出 → 换词 → 新行自下方错峰落位（纵向）
+    //   换歌：旧内容整体右滑淡出 → 换曲 → 新内容自左侧非线性映入（横向，Material 强调曲线）
+    // 两者都由「归一化进度」驱动，静息值即终态，对常规布局零影响。
+    //
+    // 为什么渲染用词表要自己持有一份（shownWords）：后端在 emit lineChanged
+    // **之前**就已经把 words 换成新行了，通知到达时旧文本已不存在 ——
+    // 对「已经消失的内容」无法补动画。所以「送出旧行」必须在换词之前完成，
+    // 换词时机由本组件掌握（见 commitPendingLine）。
 
-    // 进度驱动器：把 root.lineSweepPulse 从 0 缓动到 1。
-    // 注意 id 绝不能也叫 lineSweepPulse —— QML 里 id 的作用域优先级高于属性名，
-    // 同名会让函数体里的 lineSweepPulse 解析成这个动画对象（数字运算得到 NaN，
-    // 入场位移与缩放全部失效且不报任何错）。故 id 用 lineSweepPulseAnim。
-    NumberAnimation {
-        id: lineSweepPulseAnim
-        target: root
-        property: "lineSweepPulse"
-        from: 0
-        to: 1
-        duration: root.lyricAnimationsEnabled ? 760 : 1
-        easing.type: root.lyricAnimationsEnabled ? Easing.OutCubic : Easing.Linear
+    // 当前实际渲染的行快照（不直接绑 backend.words）
+    property var shownWords: []
+    property bool shownWordTiming: false
+    property string shownSubLine: ""
+    property bool shownSubIsTranslation: false
+    property bool shownLineIsJapanese: false
+
+    function applyLine(words, wordTiming, subLine, subIsTranslation, japanese) {
+        shownWords = words
+        shownWordTiming = wordTiming
+        shownSubLine = subLine
+        shownSubIsTranslation = subIsTranslation
+        shownLineIsJapanese = japanese
     }
 
-    // 单词入场进度：delay 单位 ms，span 为单个词的入场时长
-    function wordEnterProgress(index, delay, span) {
-        if (!lyricAnimationsEnabled)
-            return 1
-        var elapsed = lineSweepPulse * lineSweepPulseDuration - delay
-        if (elapsed <= 0)
-            return 0
-        return Math.max(0, Math.min(1, elapsed / span))
+    function clamp01(value) {
+        return Math.max(0, Math.min(1, value))
     }
 
-    // 速度归零的过冲缓出：用于逐词落地的回弹（约 1.7% 过冲后收回）
+    // 速度归零的过冲缓出：用于逐词落地的回弹
     function easeOutBack(progress) {
-        var p = Math.max(0, Math.min(1, progress))
+        var p = clamp01(progress)
         var factor = 1.70158
         var shifted = p - 1
         return 1 + (factor + 1) * Math.pow(shifted, 3)
                + factor * Math.pow(shifted, 2)
     }
 
-    readonly property int lineSweepPulseDuration: lyricAnimationsEnabled ? 760 : 1
-    // 逐词错峰间距：词多时自动压缩，整行入场不会拖到下一句都唱上了才播完
-    readonly property int wordStaggerMs: {
-        var n = (sweepRow.words && sweepRow.words.length) ? sweepRow.words.length : 1
-        return Math.max(24, Math.min(70, Math.round(520 / Math.max(1, n))))
+    function easeInCubic(progress) {
+        var p = clamp01(progress)
+        return p * p * p
     }
 
-    // 换行扫掠高光：从左到右扫过整行，位置由 lineSweepPulse 驱动
+    function easeOutCubic(progress) {
+        var p = clamp01(progress)
+        var inverse = 1 - p
+        return 1 - inverse * inverse * inverse
+    }
+
+    // Material 3「强调减速」cubic-bezier(0.05, 0.7, 0.1, 1)：
+    // 起步极快、长尾缓收 —— 这就是「非线性平移」的观感来源（类似 Material You）。
+    // 二分法解 x→t 再取 y，避免闭式解在端点附近不稳定。
+    function bezierAxis(parameter, control1, control2) {
+        var inverse = 1 - parameter
+        return 3 * inverse * inverse * parameter * control1
+               + 3 * inverse * parameter * parameter * control2
+               + parameter * parameter * parameter
+    }
+
+    function emphasizedDecelerate(progress) {
+        var x = clamp01(progress)
+        var lower = 0, upper = 1, parameter = x
+        for (var i = 0; i < 24; ++i) {
+            var currentX = bezierAxis(parameter, 0.05, 0.1)
+            if (Math.abs(currentX - x) < 0.000001)
+                break
+            if (currentX < x)
+                lower = parameter
+            else
+                upper = parameter
+            parameter = (lower + upper) / 2
+        }
+        return bezierAxis(parameter, 0.7, 1)
+    }
+
+    // ---- 换行：一条 0 → 1 的归一化进度 ----
+    // 前 lineSwapAtMs 是「送出」阶段（画面里仍是旧行），之后是「映入」阶段（新行）。
+    property real linePulse: 1
+    property var pendingLine: null
+    readonly property int lineSwapAtMs: 200
+    readonly property int lineWordSpanMs: 400
+
+    // 本次换行的时长参数在**开始时一次性定死**，不随 shownWords 现算：
+    // 切换点一到 shownWords 就换成新行，若时长跟着新行词数重算，
+    // lineElapsedMs = linePulse × 时长 会在动画中途跳一下（进度不连续），
+    // 入场会「抽搐」一次。定死之后 linePulseAnim.duration 全程不变。
+    property int activeWordStaggerMs: 26
+    property int activeEnterWindowMs: 400
+    property int activePulseDuration: 1
+
+    // 逐词错峰间距：词多则压缩，保证最后一个词也落在映入窗口内
+    function wordStaggerFor(wordCount) {
+        var n = Math.max(1, wordCount)
+        return Math.max(12, Math.min(52, Math.round(260 / n)))
+    }
+
+    readonly property real lineElapsedMs: linePulse * activePulseDuration
+    readonly property bool lineSwapDone: lyricAnimationsEnabled && lineElapsedMs >= lineSwapAtMs
+
+    // 送出阶段的线性进度（真实时间 ↔ 进度线性对应）
+    readonly property real lineExitLinear: clamp01(lineElapsedMs / lineSwapAtMs)
+    // 位移用前段快、后段缓的 easeOutCubic：旧行一上来就明显抬起来。
+    // 若用 easeInCubic（前段几乎不动、后段猛冲），位移会被同时进行的淡出盖掉，
+    // 观感上等于「没有滑出」—— 实测 45% 处才抬起 9%，肉眼根本看不见。
+    readonly property real lineExitProgress: {
+        if (!lyricAnimationsEnabled)
+            return 0
+        return easeOutCubic(lineExitLinear)
+    }
+    readonly property real lineEnterProgress: {
+        if (!lyricAnimationsEnabled)
+            return 1
+        var elapsed = lineElapsedMs - lineSwapAtMs
+        if (elapsed <= 0)
+            return 0
+        return emphasizedDecelerate(elapsed / Math.max(1, activeEnterWindowMs))
+    }
+
+    // 逐词进度只在「映入」阶段推进；送出阶段恒为终值 —— 词组保持原位，
+    // 由整行位移负责把旧行抬走（否则旧行会先被逐词偏移打散，不像一整行滑出）。
+    function wordEnterProgress(index, delay, span) {
+        if (!lyricAnimationsEnabled || linePulse >= 1)
+            return 1
+        if (lineElapsedMs < lineSwapAtMs)
+            return 1
+        var elapsed = lineElapsedMs - lineSwapAtMs - delay
+        if (elapsed <= 0)
+            return 0
+        return clamp01(elapsed / span)
+    }
+
+    // 进度驱动器：linePulse 从 0 线性走到 1（真实时间 ↔ 进度线性对应），
+    // 缓动在各阶段内部各自施加，便于精确分配「送出 / 映入」的时长。
+    // 注意 id 绝不能叫 linePulse —— QML 里 id 优先级高于属性名，同名会让
+    // 函数体里的 linePulse 解析成动画对象（算术得 NaN，且不报任何错）。
+    NumberAnimation {
+        id: linePulseAnim
+        target: root
+        property: "linePulse"
+        from: 0
+        to: 1
+        duration: root.activePulseDuration
+        easing.type: Easing.Linear
+    }
+
+    // 到切换点就换词（pendingLine 在 beginLineChange 里写入）。
+    // 三个条件缺一不可：
+    //   1. pendingLine 已挂 —— 本次换行确实有行要换
+    //   2. 进度驱动器**正在跑** —— 否则这次 lineElapsedMs 变化只是归零/复位副作用
+    //   3. 已越过切换点
+    // 只判派生的 lineSwapDone 是不够的：QML 派生属性是惰性求值的，归零那一瞬
+    // 处理器可能赶在它重算之前跑，读到的是上一轮的「已过切换点」真值 ——
+    // 实测会出现 elapsed 已经读到 0、却当场把新词提交上去，旧行根本没机会送出。
+    // 所以这里直接读 lineElapsedMs（读取会强制重算，拿到的是当前值）。
+    onLineElapsedMsChanged: {
+        if (!pendingLine || !linePulseAnim.running)
+            return
+        if (lineElapsedMs >= lineSwapAtMs)
+            commitPendingLine()
+    }
+
+    function commitPendingLine() {
+        if (!pendingLine)
+            return
+        var line = pendingLine
+        pendingLine = null
+        applyLine(line.words, line.wordTiming, line.subLine,
+                  line.subIsTranslation, line.japanese)
+        // 换行总是从行首显示：瞬时归零滚动，避免沿用上一行偏移
+        sweepRow.prepareLineChange()
+    }
+
+    // ---- 换歌：送出 / 映入两段独立进度 ----
+    // 不能用单一进度：新曲目的歌词何时到达是异步的（可能几百毫秒后才 ready），
+    // 「映入」只能等拿到首行再启动。
+    property real songOutProgress: 0
+    property real songInProgress: 1
+    // 本次换歌还没有渲染过任何一行（决定新曲目首行走横向映入还是纵向换行）
+    property bool songFirstLinePending: false
+    property bool deferredSongLine: false
+
+    // 整块内容的横向位移：旧内容向右送出（0 → +span），新内容自左侧映入（−span → 0）
+    readonly property real songSweepSpan: Math.max(56, contentRow.width * 0.34)
+    readonly property real songSlideX: easeInCubic(songOutProgress) * songSweepSpan
+                                       - (1 - emphasizedDecelerate(songInProgress)) * songSweepSpan
+    // 整块内容的淡出淡入；静息值 1
+    readonly property real songOpacity: clamp01((1 - songOutProgress) * songInProgress)
+
+    // 换歌过渡进行中（送出阶段 / 等首行 / 映入阶段）。
+    // 刻意用显式标志，不由 songOutProgress / songInProgress 推导：beginSongSweep() 里
+    // songOutAnim.start() 只是把动画排上队，进度要等下一帧才动，而后端的 _clear_line()
+    // 紧跟着**同步**发来一条空词表的 lineChanged —— 那一刻推导出来的「未在过渡」会让
+    // 这个空行被当成真换行提交，刚起步的送出动画当场被打断，等于又看不到滑出。
+    property bool songEpisodeActive: false
+    // 送出动画是否正在播：只有这段窗口里才让旧行留在画面上滑出去，
+    // 之后（等新歌词的空档）把状态文案顶上来，卡片不至于白着干等。
+    readonly property bool songSweepingOut: songOutAnim.running
+
+    NumberAnimation {
+        id: songOutAnim
+        target: root
+        property: "songOutProgress"
+        from: 0
+        to: 1
+        duration: root.lyricAnimationsEnabled ? 220 : 1
+        easing.type: Easing.Linear
+        onFinished: {
+            // 新行在送出动画还没播完时就到了：等这里收尾再映入，别把送出截成半截
+            if (root.deferredSongLine) {
+                root.deferredSongLine = false
+                root.startSongEnter()
+                return
+            }
+            if (root.observedState === "ready")
+                root.settleSongEpisode()
+        }
+    }
+
+    // 兜底计时器：ready 之后仍拿不到首行时强制结束过渡。
+    // 不设它的话，songOpacity 会停在 (1-1)×1 = 0，整块内容（含间奏三点呼吸点）
+    // 一直不可见 —— 「新曲目一上来就是长间奏」时后端不会发 lineChanged，必然踩到。
+    Timer {
+        id: songFirstLineWatchdog
+        interval: 450
+        repeat: false
+        onTriggered: {
+            if (!root.songFirstLinePending)
+                return
+            if (root.backend)
+                root.applyLine(root.backend.words, root.backend.wordTiming,
+                               root.backend.subLine, root.backend.subIsTranslation,
+                               root.backend.lineIsJapanese)
+            root.resetSongEpisode()
+        }
+    }
+
+    // 送出播完 / ready 到来后调用：能收尾就收尾，收不了就挂看门狗
+    function settleSongEpisode() {
+        if (!songFirstLinePending || songOutAnim.running)
+            return
+        // 后端已持有新行 → 立刻横向映入（首行跟着整块一起从左侧进来）
+        if (backend && backend.words && backend.words.length > 0) {
+            startSongEnter()
+            return
+        }
+        if (!songFirstLineWatchdog.running)
+            songFirstLineWatchdog.restart()
+    }
+
+    NumberAnimation {
+        id: songInAnim
+        target: root
+        property: "songInProgress"
+        from: 0
+        to: 1
+        duration: root.lyricAnimationsEnabled ? 560 : 1
+        easing.type: Easing.Linear
+        onFinished: root.songEpisodeActive = false
+    }
+
+    function resetSongEpisode() {
+        songFirstLineWatchdog.stop()
+        songOutAnim.stop()
+        songInAnim.stop()
+        songOutProgress = 0
+        songInProgress = 1
+        songFirstLinePending = false
+        deferredSongLine = false
+        songEpisodeActive = false
+    }
+
+    function beginSongSweep() {
+        if (!lyricAnimationsEnabled) {
+            resetSongEpisode()
+            return
+        }
+        songFirstLineWatchdog.stop()
+        songOutAnim.stop()
+        songInAnim.stop()
+        songOutProgress = 0
+        songInProgress = 1
+        songFirstLinePending = true
+        deferredSongLine = false
+        // 必须在 start() 之前立起来：stop()/start() 之间会同步跑过后端的 _clear_line()
+        songEpisodeActive = true
+        songOutAnim.start()
+    }
+
+    // 新曲目首行：走横向映入
+    function startSongEnter() {
+        if (!backend)
+            return
+        songFirstLineWatchdog.stop()
+        applyLine(backend.words, backend.wordTiming, backend.subLine,
+                  backend.subIsTranslation, backend.lineIsJapanese)
+        sweepRow.prepareLineChange()
+        songFirstLinePending = false
+        // 先归零送出进度：此刻 songInProgress 为 0，整块不可见，位置突跳看不出来
+        songOutProgress = 0
+        songInProgress = 0
+        songInAnim.restart()
+    }
+
+    // ---- 歌词块的统一位移与不透明度 ----
+    // 纵向：送出阶段整体上抬，映入阶段自下方落位
+    readonly property real lineLiftPx: Math.max(12, sweepRow.pixelSize * 0.6)
+    readonly property real lyricSlideY: {
+        if (!lyricAnimationsEnabled || linePulse >= 1)
+            return 0
+        if (lineElapsedMs < lineSwapAtMs)
+            return -lineExitProgress * lineLiftPx
+        return (1 - easeOutCubic(lineEnterProgress)) * lineLiftPx
+    }
+    readonly property real lineOpacity: {
+        if (!lyricAnimationsEnabled || linePulse >= 1)
+            return 1
+        if (lineElapsedMs < lineSwapAtMs)
+            // 淡出故意走后段加速（easeInCubic）：位移先走、透明度后掉。
+            // 两者同步的话内容还没抬起来就淡没了，等于白做位移。
+            return 1 - easeInCubic(lineExitLinear)
+        return lineEnterProgress
+    }
+    // 换歌（横向 + 整块）× 换行（纵向 + 淡出）× 关动画时的轻量淡入
+    readonly property real lyricSlideX: songSlideX
+    readonly property real lyricOpacity: songOpacity * lineOpacity * linePopOpacity
+
+    onLyricAnimationsEnabledChanged: {
+        // 关掉时把动画留下的中间态立刻归位，否则会停在歪斜/半透明上
+        linePulseAnim.stop()
+        resetSongEpisode()
+        linePulse = 1
+        activePulseDuration = 1
+        pendingLine = null
+        if (!lyricAnimationsEnabled && backend) {
+            // 可能还挂着未提交的词表切换，立刻落位
+            applyLine(backend.words, backend.wordTiming, backend.subLine,
+                      backend.subIsTranslation, backend.lineIsJapanese)
+        }
+    }
+
+    // 换行扫掠高光：一条窄光带沿行内从左到右扫过，只在新行映入阶段出现。
+    // 位置必须用 mapToItem 换算到 root 坐标 —— 直接拿 sweepRow.x/y 当 root 坐标
+    // 会把光带画到组件顶部去（sweepRow 的坐标相对 contentRow，而 contentRow 又被
+    // contentArea 的左内边距与 header 行高整体下移）。光带宽度收在行宽以内，
+    // 不再扫到组件外面。
+    readonly property point sweepOriginPoint: contentRow.mapToItem(root, sweepRow.x, sweepRow.y)
+    readonly property real sweepBarWidth: Math.max(24, sweepRow.width * 0.28)
+
     Rectangle {
         id: lineSweepHighlight
         objectName: "lineSweepHighlight"
         parent: root
-        visible: root.lyricAnimationsEnabled && root.lineSweepPulse < 1 && sweepRow.visible
-        width: Math.max(0, sweepRow.width)
+        // 只在映入阶段出现：光带扫过的正是「刚落位的新行」
+        visible: root.lyricAnimationsEnabled && root.lineSwapDone
+                 && root.linePulse < 1 && sweepRow.visible
+        width: root.sweepBarWidth
         height: 2
         radius: 1
         color: root.sungColor
-        opacity: visible ? 0.5 * Math.sin(Math.PI * Math.min(1, Math.max(0, root.lineSweepPulse))) : 0
-        x: sweepRow.x + (root.lyricAnimationsEnabled
-                         ? (root.lineSweepPulse * 2 - 1) * sweepRow.width
-                         : 0)
-        y: sweepRow.y + sweepRow.height / 2
+        opacity: visible ? 0.5 * Math.sin(Math.PI * root.clamp01(root.lineEnterProgress)) : 0
+        x: root.sweepOriginPoint.x - root.sweepBarWidth
+           + root.lineEnterProgress * (sweepRow.width + root.sweepBarWidth)
+        // 压在主行文字下缘（穿过字身中段会被字形盖住、只剩缝里那点，几乎看不见）
+        y: root.sweepOriginPoint.y + sweepRow.height - 3
 
         Behavior on opacity {
             NumberAnimation { duration: 90; easing.type: Easing.OutCubic }
         }
     }
 
-    // 换歌：整组件扫过——旧内容向右抖出，新内容从左侧大幅滑入，再回弹归位。
-    // 之所以放在 root 上而不是逐元素：换歌是「整块内容重来」，逐元素做反而碎。
-    // 不动 scale（规模外扩会顶到宿主布局），只用水平位移 + 透明度，
-    // 幅度取组件宽度的 22%，比换行长距离的滑入更明显。
-    SequentialAnimation {
-        id: songSweepAnim
-        NumberAnimation {
-            target: root
-            property: "songSlideX"
-            from: 0
-            to: root.lyricAnimationsEnabled ? root.width * 0.16 : 0
-            duration: root.lyricAnimationsEnabled ? 170 : 1
-            easing.type: Easing.InCubic
-        }
-        ParallelAnimation {
-            NumberAnimation {
-                target: root
-                property: "songSlideX"
-                from: root.lyricAnimationsEnabled ? root.width * 0.16 : 0
-                to: root.lyricAnimationsEnabled ? -root.width * 0.22 : 0
-                duration: root.lyricAnimationsEnabled ? 340 : 1
-                easing.type: Easing.OutCubic
-            }
-            NumberAnimation {
-                target: root
-                property: "songSlideOpacity"
-                from: root.lyricAnimationsEnabled ? 0.0 : 1
-                to: 1
-                duration: root.lyricAnimationsEnabled ? 340 : 1
-                easing.type: Easing.OutCubic
-            }
-        }
-        ParallelAnimation {
-            NumberAnimation {
-                target: root
-                property: "songSlideX"
-                from: root.lyricAnimationsEnabled ? -root.width * 0.22 : 0
-                to: 0
-                duration: root.lyricAnimationsEnabled ? 420 : 1
-                easing.type: Easing.OutBack
-            }
-            NumberAnimation {
-                target: root
-                property: "songSlideOpacity"
-                from: 1
-                to: 1
-                duration: root.lyricAnimationsEnabled ? 420 : 1
-            }
-        }
-        onFinished: {
-            // 必须显式复位：songSweeping 只在动画期间为 true，
-            // 否则下一次换歌的重入判定会一直被挡住（曾因此第二次换歌不再播放）。
-            root.songSweeping = false
-            root.songSlideX = 0
-            root.songSlideOpacity = 1
-        }
-    }
+    // ---- 换行入口 ----
+    function beginLineChange() {
+        if (!backend)
+            return
+        var words = backend.words
 
-    // 内容层水平位移与不透明度：仅供换歌动画驱动，静息值为 0 / 1
-    property real songSlideX: 0
-    property real songSlideOpacity: 1
-    property bool songSweeping: false
+        if (songEpisodeActive) {
+            // 换歌过程中的 _clear_line()（words 为空）不是真换行，忽略即可 ——
+            // 若在这里归位，刚起步的「送出」动画会被立刻打断、等于没有滑出。
+            if (!words || words.length === 0)
+                return
+            if (songFirstLinePending) {
+                if (songOutAnim.running) {
+                    // 送出还没播完，等它收尾再映入
+                    deferredSongLine = true
+                    return
+                }
+                startSongEnter()
+                return
+            }
+        }
 
-    onLyricAnimationsEnabledChanged: {
-        // 关掉时把动画留下的中间态立刻归位，否则会停在歪斜/半透明上
+        var line = { words: words, wordTiming: backend.wordTiming,
+                     subLine: backend.subLine,
+                     subIsTranslation: backend.subIsTranslation,
+                     japanese: backend.lineIsJapanese }
+
         if (!lyricAnimationsEnabled) {
-            songSweepAnim.stop()
-            songSweeping = false
-            songSlideX = 0
-            songSlideOpacity = 1
-            root.lineSweepPulse = 1
+            linePulseAnim.stop()
+            linePulse = 1
+            activePulseDuration = 1
+            activeEnterWindowMs = 1
+            pendingLine = line
+            commitPendingLine()
+            linePop.restart()
+            return
         }
+        // 顺序不可颠倒，且「挂待换行」必须排在归零**之后**：
+        // 归零会让 lineElapsedMs 从「已越过切换点」的大值跳回 0，而派生属性是惰性
+        // 求值的 —— 变化处理器有可能赶在 lineSwapDone 重算之前跑、读到上一轮的真值，
+        // 当场就把新词提交上去。此时 pendingLine 还是 null，这一步天然免疫。
+        linePulseAnim.stop()
+        linePulse = 0
+        var count = (words && words.length) ? words.length : 1
+        activeWordStaggerMs = wordStaggerFor(count)
+        activeEnterWindowMs = lineWordSpanMs + activeWordStaggerMs * (count - 1)
+        activePulseDuration = lineSwapAtMs + activeEnterWindowMs
+        pendingLine = line
+        linePulseAnim.start()
     }
 
-    // 换歌识别：后端 _on_song_changed 的第一件事是把 state 从 "ready" 归到 "idle"
-    // （随后立刻转 loading）。这条 ready → idle 的**下降沿**就是换歌信号：
-    // 首次加载、重试、改歌词源都不会从 ready 掉到 idle，因此不会误播。
-    // 注意 previousState 存的是「本次 event 携带的新状态」，所以判定必须
-    // 在 previousState 变为 "idle" 时触发，而不是变为 "ready" 时。
-    property string previousState: ""
-    onPreviousStateChanged: {
-        if (previousState === "idle" && lastReadyState && root.lyricAnimationsEnabled) {
-            songSweepAnim.stop()
-            songSlideX = 0
-            songSlideOpacity = 0
-            songSweeping = true
-            songSweepAnim.start()
+    // ---- 后端状态观察 ----
+    // 可见性判据不能直接读 backend.state：换歌时后端把 state 从 ready 瞬降到 idle
+    // （同一次调用里紧接着转 loading），若照 idle 判 shouldShow=false，整组件会先播
+    // 一次退场淡出，把横扫动画整个盖掉 —— 这正是「换歌动画看不见」的根因。
+    // 所以把「状态」与「换歌过渡标志」放在同一个函数里一次性写入，
+    // 保证 shouldShow 只按最终值求值一次，不会落在中间态上。
+    property string observedState: ""
+    property bool songTransitionHold: false
+
+    function observeState(nextState) {
+        // 判据用「离开了一个有内容的状态」而不是「刚才是否 ready」：
+        // 首曲还在 loading 时用户就切歌，走的是 loading → idle，若只认 ready→idle，
+        // 这一瞬 shouldShow 会掉到 false，整组件先淡出再淡入，闪一下。
+        var hadContent = observedState !== "" && observedState !== "idle"
+        if (nextState === "idle" && hadContent) {
+            // 顺序不可颠倒：先立标志（此刻 observedState 仍是旧值，
+            // shouldShow 依旧为真，这次求值不会引发退场），再写状态。
+            songTransitionHold = true
+            beginSongSweep()
+        } else if (nextState === "ready" || nextState === "nomatch"
+                   || nextState === "error") {
+            songTransitionHold = false
+            if (nextState === "ready")
+                settleSongEpisode()
+            else
+                resetSongEpisode()
         }
-        lastReadyState = (previousState === "ready")
+        observedState = nextState
     }
-    // 上一次收到的状态是否为 ready；用来把 ready→idle 与「启动期的 idle」区分开
-    property bool lastReadyState: false
+
+    // backend 是创建后才注入的，注入那一刻可能已经是 ready/loading，
+    // 必须主动同步一次，否则要等下一次 stateChanged 才有可见性。
+    // 同时补一次行快照：后端可能早就发过 lineChanged（连接建立之前），
+    // 快照式渲染不去主动取一次的话，得等到下一次换行才有内容。
+    onBackendChanged: {
+        observeState(backend ? backend.state : "")
+        if (backend)
+            applyLine(backend.words, backend.wordTiming, backend.subLine,
+                      backend.subIsTranslation, backend.lineIsJapanese)
+    }
 
     Connections {
         target: root.backend
         function onStateChanged() {
-            root.previousState = root.backend ? root.backend.state : ""
+            root.observeState(root.backend ? root.backend.state : "")
         }
         function onLineChanged() {
-            sweepRow.prepareLineChange()
-            if (root.lyricAnimationsEnabled) {
-                lineSweepPulseAnim.stop()
-                root.lineSweepPulse = 0
-                lineSweepPulseAnim.start()
-            } else {
-                linePop.restart()
-            }
+            root.beginLineChange()
         }
     }
 
@@ -451,22 +776,24 @@ Widget {
         spacing: 8
         visible: root.shouldShow
 
-        // 换歌时整块内容横扫：translate 位移 + 淡入，静息时回到 0 / 1，对常规布局零影响。
-        // 不用 x / width / height —— 锚点会吃掉 x，而宽度受框架收窄逻辑约束，都不参与动画。
-        opacity: root.songSlideOpacity
-        transform: Translate { x: root.songSlideX }
+        // 换歌横扫（横向，Material 强调曲线）× 换行抬升（纵向）× 淡入淡出，
+        // 静息时位移为 0、不透明度为 1，对常规布局零影响。
+        // 不用 x / width / height —— 锚点会吃掉 x，而宽度受框架收窄逻辑约束，
+        // 都不参与动画；transform 锚点管不到，是唯一可靠通道。
+        opacity: root.lyricOpacity
+        transform: Translate { x: root.lyricSlideX; y: root.lyricSlideY }
 
         // 当前行：状态文案 与 逐字扫描 二选一，同为 Title 标尺
         // 状态文案用框架 Title（CW2 内置组件的占位写法，如 Nothing right now）
         Title {
             id: statusText
-            visible: !backend || backend.state !== "ready"
+            visible: root.statusTextActive
             text: {
                 if (!backend)
                     return ""
                 if (!root.hasMedia)
                     return qsTr("未在播放")
-                switch (backend.state) {
+                switch (root.observedState) {
                 case "loading": return qsTr("正在获取歌词…")
                 case "nomatch": return qsTr("未找到这首歌的歌词")
                 case "error": return qsTr("歌词获取失败")
@@ -490,16 +817,18 @@ Widget {
             // 短行按字宽撑开；长行顶到 maximumWidth 后由跑马灯滚动
             readonly property real mainMaxWidth: Math.max(120, 480 - secondaryReserve)
             Layout.maximumWidth: mainMaxWidth
-            clip: true
-            words: backend ? backend.words : []
-            wordTiming: backend ? backend.wordTiming : false
+            // 渲染词表读**快照**而不是 backend.words：后端在 emit lineChanged 之前
+            // 就已把 words 换成新行，直接绑后端的话旧行在通知到达时已经不存在，
+            // 「滑出」根本没东西可动。快照由 applyLine / commitPendingLine 掌握时机。
+            words: root.shownWords
+            wordTiming: root.shownWordTiming
             positionMs: backend ? backend.positionMs : 0
             baseColor: root.unsungColor
             fillColor: root.sungColor
             pixelSize: root.titlePx
             fontFamily: root.originalFontFamily
             fontWeight: root.originalFontWeight
-            lineIsJapanese: backend ? backend.lineIsJapanese : false
+            lineIsJapanese: root.shownLineIsJapanese
             furiganaEnabled: root.furiganaEnabled
             japaneseFontFamily: root.japaneseFontFamily
             japaneseFontWeight: root.japaneseFontWeight
@@ -510,13 +839,11 @@ Widget {
             // 注意：不能用 baseText.height（首帧还未布局，会得到 NaN 并把整个
             // delegate 的 scale 污染成 NaN，入场动画直接消失）。
             readonly property real lineEnterScale: {
-                if (root.lineSweepPulse >= 1)
+                if (!root.lyricAnimationsEnabled || root.linePulse >= 1)
                     return 1
-                if (!root.lyricAnimationsEnabled)
-                    return 1
-                var p = root.lineSweepPulse
-                // 起步略过冲再回落，给出「弹一下」的灵动感
-                return 1 + 0.05 * Math.sin(Math.PI * Math.min(1, p * 1.15))
+                // 起步略过冲再回落，给出「弹一下」的灵动感；
+                // 送出阶段 lineEnterProgress 恒为 0，缩放保持 1 不起伏
+                return 1 + 0.06 * Math.sin(Math.PI * Math.min(1, root.lineEnterProgress * 1.15))
             }
             transformOrigin: Item.Center
             scale: lineEnterScale
@@ -549,13 +876,13 @@ Widget {
         MarqueeTitle {
             id: subLabel
             visible: !miniMode && sweepRow.visible && text !== ""
-            text: backend ? backend.subLine : ""
+            text: root.shownSubLine
             maximumWidth: 200
             speed: 100
-            opacity: backend && backend.subIsTranslation ? 0.62 : 0.38
-            font.family: backend && backend.subIsTranslation
+            opacity: root.shownSubIsTranslation ? 0.62 : 0.38
+            font.family: root.shownSubIsTranslation
                          ? root.translationFontFamily : root.originalFontFamily
-            font.weight: backend && backend.subIsTranslation
+            font.weight: root.shownSubIsTranslation
                          ? root.translationFontWeight : root.originalFontWeight
         }
     }
@@ -620,6 +947,23 @@ Widget {
 
         implicitWidth: wordRow.implicitWidth
         implicitHeight: wordRow.implicitHeight
+
+        // 入场位移需要纵向余量。裁切本身只为「按宽度裁掉跑马灯溢出」，但逐词入场是
+        // 从下方近一个字高处冲上来、注音与回弹缩放还会向上溢 —— 若裁切区恰好等于
+        // 行高，新行整个入场过程都发生在裁切区之外，只剩落位前最后一小段可见，
+        // 观感就是「没有入场动画」。所以把裁切下移到内层视口，上下各留一段余量；
+        // 横向裁切行为与原来完全一致（视口宽度 = 组件宽度）。
+        // 余量取一个字号：正好覆盖逐词入场的 0.95em 位移。余量本身是空白区域，
+        // 只有当词真的偏移到那里（那一刻不透明度≈0）才会有内容，不会画出界。
+        readonly property real verticalClipMargin: Math.max(8, Math.ceil(pixelSize * 1.05))
+
+        Item {
+            id: sweepViewport
+            y: -sweep.verticalClipMargin
+            width: sweep.width
+            height: sweep.height + sweep.verticalClipMargin * 2
+            clip: true
+        }
 
         Behavior on displayedScrollX {
             enabled: sweep.scrollAnimating
@@ -724,8 +1068,13 @@ Widget {
 
         Row {
             id: wordRow
+            // 挂进上方那个带纵向余量的裁切视口。用 parent 而不是把整段 delegate
+            // 再缩进一层，语义等价（Row 成为视口的子项）但 diff 最小。
+            parent: sweepViewport
             spacing: 0
             x: sweep.displayedScrollX
+            // 视口整体上移了 margin，这里补偿回来，词行在组件里的位置不变
+            y: sweep.verticalClipMargin
 
             Repeater {
                 model: sweep.words
@@ -747,7 +1096,7 @@ Widget {
                     // 位移必须走 transform，不能写 `y:` —— delegate 是 Row 的子项，
                     // Row 的布局每次都会把 y 重设回 0，直接写 y 属性会被无声吃掉。
                     readonly property real enterProgress: root.wordEnterProgress(
-                        index, index * root.wordStaggerMs, 460)
+                        index, index * root.activeWordStaggerMs, 460)
                     // 越靠后的词错峰越晚，用同一 Easing.OutBack 做一次速度归零的落地，
                     // 否则「迟到的词」看起来只是淡入，没有冲进来的感觉
                     readonly property real enterEased: root.easeOutBack(enterProgress)

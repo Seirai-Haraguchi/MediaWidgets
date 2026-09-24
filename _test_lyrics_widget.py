@@ -39,13 +39,16 @@ def build_stub_module():
         "module ClassWidgets.Theme\n"
         "Widget 2.0 Widget.qml\n"
         "Title 2.0 Title.qml\n"
+        "Subtitle 2.0 Subtitle.qml\n"
         "MarqueeTitle 2.0 MarqueeTitle.qml\n",
         encoding="utf-8")
     (mod_dir / "Widget.qml").write_text(
         "import QtQuick\n"
+        "import QtQuick.Layouts\n"
         "Item {\n"
         "    id: widgetBase\n"
-        "    property string text: ''\n"
+        "    property alias text: subtitleLabel.text\n"
+        "    property alias subtitle: subtitleArea.children\n"
         "    property bool miniMode: false\n"
         "    property bool editMode: false\n"
         "    property var backend: null\n"
@@ -53,7 +56,10 @@ def build_stub_module():
         "    property real padding: miniMode ? 16 : 24\n"
         "    property alias backgroundArea: backgroundArea.children\n"
         "    default property alias content: contentArea.data\n"
-        "    implicitWidth: 260\n"
+        "    // 与 CW2 真实 BaseWidget 一字不差：宽度取 header 行与内容区较宽者。\n"
+        "    // 真实实现里 headerRow 的可见性还参与版式，故这里同样保留可见性判据，\n"
+        "    // 让「往 subtitle 槽位塞东西会不会撑宽组件 / 顶掉 header 行」可被测试覆盖。\n"
+        "    implicitWidth: Math.max(headerRow.implicitWidth, contentArea.childrenRect.width) + 48\n"
         "    height: miniMode ? 56 : 100\n"
         "    // 与 CW2 真实 Widget 同款卡片底：圆角矩形 + 渐变描边\n"
         "    Rectangle {\n"
@@ -64,7 +70,33 @@ def build_stub_module():
         "        border.color: Qt.rgba(1, 1, 1, 0.9)\n"
         "    }\n"
         "    Item { id: backgroundArea; anchors.fill: parent }\n"
-        "    Item { id: contentArea; anchors.fill: parent }\n"
+        "    ColumnLayout {\n"
+        "        anchors.fill: parent\n"
+        "        anchors.margins: 12\n"
+        "        spacing: 8\n"
+        "        RowLayout {\n"
+        "            id: headerRow\n"
+        "            Layout.fillWidth: true\n"
+        "            visible: (subtitle.length > 1 || widgetBase.text.length > 0) && !miniMode\n"
+        "            RowLayout {\n"
+        "                id: subtitleArea\n"
+        "                Layout.fillHeight: true\n"
+        "                Subtitle { id: subtitleLabel }\n"
+        "            }\n"
+        "        }\n"
+        "        Item {\n"
+        "            id: contentArea\n"
+        "            Layout.fillWidth: true\n"
+        "            Layout.fillHeight: true\n"
+        "        }\n"
+        "    }\n"
+        "}\n",
+        encoding="utf-8")
+    (mod_dir / "Subtitle.qml").write_text(
+        "import QtQuick\n"
+        "Text {\n"
+        "    opacity: 0.6\n"
+        "    font.pixelSize: 16\n"
         "}\n",
         encoding="utf-8")
     (mod_dir / "Title.qml").write_text(
@@ -510,6 +542,14 @@ def main():
         QTimer.singleShot(ms, loop.quit)
         loop.exec()
 
+    # 组件刻意把「词表 / 副行 / 日语字体」的切换延后到换行后的 lineSwapAtMs，
+    # 先让旧行滑出去再换词（见 LyricsWidget.commitPendingLine）。
+    # 所有「换行之后读新行内容」的断言都必须越过这个切换点，否则读到的是上一行快照。
+    LINE_SETTLE_MS = 200 + 280
+
+    def _settle_line():
+        _wait(LINE_SETTLE_MS)
+
     # 超长逐字行（远超 480px），用于触发跑马灯
     long_words = [
         {"text": "这一句歌词特别特别长用来触发跑马灯滚动效果一二三四五六七八九十",
@@ -520,7 +560,7 @@ def main():
     backend.set_line(long_words, word_timing=True, sub_line="Sunny day")
     backend.set_position(100)
     root.setProperty("width", 560)
-    _wait(250)
+    _settle_line()
 
     word_row = _find_wordrow()
     if word_row is None:
@@ -578,7 +618,9 @@ def main():
         sub_line="Sunny day",
     )
     backend.set_position(100)
-    _wait(50)
+    # 换行后词表在 lineSwapAtMs 才真正换掉（旧行要先滑出去），
+    # 必须等过切换点才谈得上「新行从行首开始显示」
+    _settle_line()
     word_row = _find_wordrow()
     if abs(_row_x()) > 1.0:
         print(f"FAIL: line change should snap scroll to 0, wordRow.x={_row_x()}")
@@ -593,7 +635,9 @@ def main():
         sub_line="",
     )
     backend.set_position(100)
-    _wait(200)
+    # 组件为「旧行送出」刻意延后 200ms 才换上新的词表/副行（见 commitPendingLine），
+    # 断言必须等到切换点之后，否则读到的是上一行的快照
+    _settle_line()
     reserve, err_r = QQmlExpression(engine.rootContext(), sweep, "secondaryReserve").evaluate()
     max_via_expr, err_m = QQmlExpression(
         engine.rootContext(), sweep, "mainMaxWidth"
@@ -616,7 +660,7 @@ def main():
         sub_line="",
     )
     backend.set_position(1000)
-    _wait(200)
+    _settle_line()
     repeater = None
     stack = [root]
     while stack:
@@ -660,7 +704,7 @@ def main():
         sub_line="",
     )
     backend.set_position(1200)
-    _wait(200)
+    _settle_line()
     repeater = None
     stack = [root]
     while stack:
@@ -686,7 +730,7 @@ def main():
         sub_line="",
     )
     backend.set_position(400)
-    _wait(150)
+    _settle_line()
     d_short, _ = QQmlExpression(engine.rootContext(), repeater, "itemAt(0)").evaluate()
     if d_short and (d_short.property("longNoteEligible") or d_short.property("glowActive")):
         print("FAIL: word ≤1000ms must not glow")
@@ -807,7 +851,8 @@ def main():
          {"text": "雨", "startMs": 1500, "endMs": 2600, "ruby": "あめ"}],
         True, "", japanese=True)
     backend.set_position(200)
-    _wait(120)
+    # 日语字体作用在「当前渲染行」上，而渲染行是延后切换的快照 → 等过换行切换点
+    _settle_line()
     if root.property("japaneseFontFamily") != "Yu Gothic":
         print(f"FAIL: japanese font family, got {root.property('japaneseFontFamily')}")
         return 1
@@ -826,7 +871,7 @@ def main():
     # 非日语行：即使配了日语字体也必须回落到原文字体，避免误伤中文/英文歌词
     backend.set_line([{"text": "晴天", "startMs": 0, "endMs": 1000, "ruby": ""}],
                      True, "", japanese=False)
-    _wait(120)
+    _settle_line()
     eff, _ = QQmlExpression(engine.rootContext(), sweep, "effectiveFontFamily").evaluate()
     if eff != "Consolas":
         print(f"FAIL: non-japanese line must fall back to original font, got {eff}")
@@ -836,7 +881,7 @@ def main():
     backend.set_line(
         [{"text": "涙", "startMs": 0, "endMs": 1000, "ruby": "なみだ"}],
         True, "", japanese=True)
-    _wait(150)
+    _settle_line()
     row = _find_wordrow()
     if row is None:
         print("FAIL: wordRow not found for furigana assertion")
@@ -897,7 +942,7 @@ def main():
          {"text": "の", "startMs": 500, "endMs": 800, "ruby": ""},
          {"text": "雨", "startMs": 800, "endMs": 1400, "ruby": "あめ"}],
         True, "", japanese=True)
-    _wait(150)
+    _settle_line()
     row = _find_wordrow()
     rep_list = [o for o in row.findChildren(QObject)
                 if o.metaObject().className().startswith("QQuickRepeater")]
@@ -939,21 +984,58 @@ def main():
     _wait(100)
 
     # ---- 换行 / 换歌动画（大幅度动效） ----
-    # 旧实现换行只有 opacity 0.35→1（260ms），用户反馈「看不出换行」。
-    # 新实现由 root.lineSweepPulse（0→1 归一化进度）驱动三层可见效果：
-    #   a) 每个词从下方行高的 34% 处、1.32 倍缩放入场，走过冲回弹
-    #   b) sweepRow 整体做一次 1.05 倍呼吸缩放（整行统一，不逐词算）
-    #   c) 一条横向扫掠高光从左扫到右
-    # 断言必须打在**真实判据**上：只有断言 delegate 的 y / scale，以及
-    # sweepRow.scale、高光 rect 的 visible，才能在实现被换回旧版时 FAIL。
-    # 断言 root.lineSweepPulse 本身是不够的（旧版没这个属性，会是 None 而假绿/假红）。
+    # 两条用户可见契约，断言全部打在**真实判据**上：
+    #   a) 换行必须是「旧行滑出 → 换词 → 新行自下方错峰落位」两段，
+    #      不能像旧实现那样只有滑入（后端在 emit lineChanged 前就已换掉 words，
+    #      组件必须自己持快照才能在换词前把旧行送走）。
+    #   b) 换歌时整块内容（含顶部歌名）横向非线性平移 + 淡出淡入，
+    #      且过渡期间组件不能被可见性判据整块淡出盖掉。
+    # 判据选的是：shownWords 快照、contentRow 的 transform/opacity、
+    # headerLabel 的 transform、shouldShow，以及缓动函数本身。
+    # 把实现换回旧版（立即换词 / 无位移 / 无自绘歌名）这些断言都会 FAIL。
     backend.set_state("ready")
     backend.set_line(
         [{"text": "晴", "startMs": 1000, "endMs": 1600, "ruby": ""},
          {"text": "天", "startMs": 1600, "endMs": 2600, "ruby": ""},
          {"text": "好", "startMs": 2600, "endMs": 3800, "ruby": ""}],
         True, "", japanese=False)
-    _wait(400)
+    _settle_line()
+
+    def _eval(obj, expression):
+        return QQmlExpression(engine.rootContext(), obj, expression).evaluate()[0]
+
+    content_row = next((o for o in root.findChildren(QObject)
+                        if o.property("objectName") == "contentRow"), None)
+    if content_row is None:
+        print("FAIL: 找不到 contentRow")
+        return 1
+    header_label = next((o for o in root.findChildren(QObject)
+                         if o.property("objectName") == "headerLabel"), None)
+    if header_label is None:
+        print("FAIL: 找不到顶部歌名 headerLabel（歌名没建出来或没挂到 subtitle 槽位）")
+        return 1
+    header_text = _eval(header_label, "text")
+    if not header_text:
+        print("FAIL: 自绘歌名文本为空（subtitle 槽位可能被列表别名写坏）")
+        return 1
+    highlight = next((o for o in root.findChildren(QObject)
+                      if o.property("objectName") == "lineSweepHighlight"), None)
+    if highlight is None:
+        print("FAIL: 找不到换行扫掠高光 lineSweepHighlight")
+        return 1
+
+    def _row_x():
+        return float(_eval(content_row, "transform[0].x") or 0.0)
+
+    def _row_y():
+        return float(_eval(content_row, "transform[0].y") or 0.0)
+
+    def _row_op():
+        return float(_eval(content_row, "opacity") or 0.0)
+
+    def _header_x():
+        return float(_eval(header_label, "transform[0].x") or 0.0)
+
     sweep = _find_sweep()
     row = _find_wordrow()
     rep = next(o for o in row.findChildren(QObject)
@@ -962,83 +1044,110 @@ def main():
     def _delegate_y(i):
         # 位移走 transform（Row 会重设子项 y，直接写 y 属性会被无声吃掉）
         d, _ = QQmlExpression(engine.rootContext(), rep, f"itemAt({i})").evaluate()
-        ty, _ = QQmlExpression(engine.rootContext(), d, "transform[0].y").evaluate()
-        return float(ty) if ty is not None else 0.0
+        return float(_eval(d, "transform[0].y") or 0.0)
 
     def _delegate_scale(i):
         d, _ = QQmlExpression(engine.rootContext(), rep, f"itemAt({i})").evaluate()
-        return float(d.property("scale") or 1)
+        return float(_eval(d, "scale") or 1.0)
 
-    # 静息态：动画播完后所有词必须精确归位，斜着的字不能留在屏幕上
-    for i in range(3):
-        if abs(_delegate_y(i)) > 0.01 or abs(_delegate_scale(i) - 1.0) > 0.001:
-            print(f"FAIL: 换行动画播完后 word{i} 必须回到 y=0 / scale=1，"
-                  f"got y={_delegate_y(i)} scale={_delegate_scale(i)}")
-            return 1
-    if abs(float(sweep.property("scale")) - 1.0) > 0.001:
-        print(f"FAIL: 换行动画播完后 sweepRow.scale 必须为 1，"
-              f"got {sweep.property('scale')}")
+    def _rendered_text():
+        # 与 _shown_text 的区别：这里读的是**实际渲染出来**的词（delegate 的 modelData），
+        # 而不是快照属性。断言片必须有这一层 —— 只断言快照属性的话，把组装层改成
+        # 直接绑后端 words（旧行在通知到达前已经被换掉）时快照属性依然是旧值，会假绿。
+        count = int(_eval(rep, "count") or 0)
+        parts = []
+        for i in range(count):
+            d, _ = QQmlExpression(engine.rootContext(), rep, f"itemAt({i})").evaluate()
+            if d is None:
+                continue
+            parts.append(_eval(d, "modelData.text") or "")
+        return "".join(parts)
+
+    old_text = _rendered_text()
+    if old_text != "晴天好":
+        print(f"FAIL: 用例前置条件不满足，静息时应渲染「晴天好」，got {old_text!r}")
         return 1
-    print("animation: 换行动画播完后逐词与整行精确归位（y=0 / scale=1）", flush=True)
 
-    # 换行瞬间：重新触发一条新行，立刻采样入场中间态。
-    # 这里不能用 app.processEvents()——它不推进 QAbstractAnimation 的时钟，
-    # 动画进度会停在 0，位移自然也是 0（假 FAIL）。用 _wait 让事件循环真正跑起来。
+    # === a-1) 换行「送出」：旧行必须原样留在画面上被抬走、淡出 ===
     backend.set_line(
         [{"text": "雨", "startMs": 0, "endMs": 600, "ruby": ""},
          {"text": "还", "startMs": 600, "endMs": 1200, "ruby": ""},
          {"text": "下", "startMs": 1200, "endMs": 1800, "ruby": ""}],
         True, "", japanese=False)
-    _wait(90)
+    # 110ms 落在送出窗口内（lineSwapAtMs=200），离切换点还有 90ms 余量。
+    # 这里不能用 app.processEvents()——它不推进 QAbstractAnimation 的时钟，
+    # 进度会停在 0（假 FAIL），必须跑真事件循环。
+    _wait(110)
+    if _rendered_text() != old_text:
+        print(f"FAIL: 换行送出阶段就换掉了词表，旧行根本没机会滑出 —— "
+              f"got {_rendered_text()!r} want {old_text!r}")
+        return 1
+    if _eval(root, "lineSwapDone"):
+        print("FAIL: 110ms 时尚未到切换点，lineSwapDone 不应为真")
+        return 1
+    exit_y = _row_y()
+    if exit_y >= -5.0:
+        print(f"FAIL: 换行送出阶段整行应明显向上抬起，got y={exit_y:.2f}")
+        return 1
+    exit_op = _row_op()
+    if exit_op >= 0.95:
+        print(f"FAIL: 换行送出阶段整行应淡出，got opacity={exit_op:.3f}")
+        return 1
+    print(f"animation: 换行「送出」——旧行原样保留并上抬淡出 "
+          f"y={exit_y:.1f} opacity={exit_op:.2f}", flush=True)
 
-    pulse_mid, _ = QQmlExpression(engine.rootContext(), root, "lineSweepPulse").evaluate()
-    if pulse_mid is None or float(pulse_mid) <= 0.0 or float(pulse_mid) >= 0.999:
-        print(f"FAIL: 换行瞬间 lineSweepPulse 应处于 0→1 之间，got {pulse_mid}"
-              f"（换行没有重启动画进度）")
-        return 1
-
-    # 错峰：靠后的词 delay 更大 → 同一时刻入场进度更小 → 位移更大。
-    # 这条把「逐词错峰」与「整行一起动」区分开，是灵动感的关键。
-    y0, y1, y2 = _delegate_y(0), _delegate_y(1), _delegate_y(2)
-    if not (y0 <= y2 + 0.01 and y1 <= y2 + 0.01 and y2 > 0.05):
-        print(f"FAIL: 逐词应错峰入场且尚未归位，got y=[{y0:.2f}, {y1:.2f}, {y2:.2f}]"
-              f"（没有逐词错峰 = 整行一起淡入，缺灵动感）")
-        return 1
-    s2 = _delegate_scale(2)
-    if not (s2 > 1.02 and s2 < 1.5):
-        print(f"FAIL: 入场中的词应为放大态（约 1.32 起步），got scale={s2:.3f}")
-        return 1
-    sweep_scale, _ = QQmlExpression(engine.rootContext(), sweep, "scale").evaluate()
-    if sweep_scale is None or abs(float(sweep_scale) - 1.0) < 1e-6:
-        print(f"FAIL: 换行期间 sweepRow 应有整体呼吸缩放，got scale={sweep_scale}")
-        return 1
-    highlight = next((o for o in root.findChildren(QObject)
-                      if o.property("objectName") == "lineSweepHighlight"), None)
-    if highlight is None:
-        print("FAIL: 找不到换行扫掠高光 lineSweepHighlight")
+    # === a-2) 换行「映入」：切换点之后新行自下方错峰落位 ===
+    _wait(160)   # 累计约 250ms，越过 lineSwapAtMs=200，进入映入阶段
+    new_text = _rendered_text()
+    if new_text != "雨还下":
+        print(f"FAIL: 越过切换点后应换上新的词表，got {new_text!r}")
         return 1
     if not highlight.property("visible"):
-        print("FAIL: 换行期间扫掠高光应可见")
+        print("FAIL: 换行映入阶段扫掠高光应可见")
         return 1
-    print(f"animation: 逐词错峰入场 y=[{y0:.1f},{y1:.1f},{y2:.1f}] "
-          f"scale={s2:.2f}，整行呼吸 {float(sweep_scale):.3f}，扫掠高光可见", flush=True)
+    y0, y1, y2 = _delegate_y(0), _delegate_y(1), _delegate_y(2)
+    if y2 <= 5.0:
+        print(f"FAIL: 映入阶段靠后的词应还在下方（大幅位移），got y=[{y0:.1f},{y1:.1f},{y2:.1f}]")
+        return 1
+    # 错峰：靠后的词 delay 更大 → 同一时刻入场进度更小 → 位移更大。
+    # 这条把「逐词错峰」与「整行一起动」区分开，是灵动感的关键。
+    if not (y0 <= y2 + 0.01 and y1 <= y2 + 0.01):
+        print(f"FAIL: 逐词应错峰入场，got y=[{y0:.1f},{y1:.1f},{y2:.1f}]"
+              f"（没有错峰 = 整行一起淡入，缺灵动感）")
+        return 1
+    s2 = _delegate_scale(2)
+    if not (s2 > 1.02 and s2 < 1.6):
+        print(f"FAIL: 入场中的词应为放大态（约 1.32 起步），got scale={s2:.3f}")
+        return 1
+    print(f"animation: 换行「映入」——逐词错峰自下方落位 "
+          f"y=[{y0:.1f},{y1:.1f},{y2:.1f}] scale={s2:.2f}，扫掠高光可见", flush=True)
 
     # 动画必须自然收尾，不能永久停在中间态
-    _wait(900)
+    _wait(1000)
     for i in range(3):
         if abs(_delegate_y(i)) > 0.01 or abs(_delegate_scale(i) - 1.0) > 0.001:
             print(f"FAIL: 换行动画应自动收尾，word{i} 停在 y={_delegate_y(i)} "
                   f"scale={_delegate_scale(i)}")
             return 1
+    if abs(_row_y()) > 0.01 or abs(_row_x()) > 0.01:
+        print(f"FAIL: 换行收尾后整行位移必须回 0，got x={_row_x()} y={_row_y()}")
+        return 1
+    if abs(_row_op() - 1.0) > 0.001:
+        print(f"FAIL: 换行收尾后整行不透明度必须为 1，got {_row_op()}")
+        return 1
     if highlight.property("visible"):
         print("FAIL: 动画结束后扫掠高光必须隐藏")
         return 1
-    if float(sweep.property("scale") or 1) != 1.0:
-        print("FAIL: 动画结束后整行缩放必须回到 1")
-        return 1
-    print("animation: 换行动画自动收尾（词归位、高光隐藏、整行缩放复位）", flush=True)
+    print("animation: 换行动画自动收尾（词归位、位移归零、高光隐藏）", flush=True)
 
-    # 关掉「换行与换歌动画」→ 各层直接落到终态，等价旧版轻量淡入
+    # === a-3) 缓动形状：换词落位必须回弹（easeOutBack 起步过冲 > 1），
+    # 落位曲线若被换成单调缓动，这条会 FAIL ===
+    overshoot = float(_eval(root, "easeOutBack(0.5)") or 0.0)
+    if overshoot <= 1.0:
+        print(f"FAIL: 逐词落位应有过冲回弹（easeOutBack(0.5) > 1），got {overshoot:.3f}")
+        return 1
+
+    # === a-4) 关掉「换行与换歌动画」→ 立刻落终态（不再等切换点） ===
     configs.set_pref("lyric_animation_enabled", False)
     _wait(120)
     backend.set_line(
@@ -1047,8 +1156,10 @@ def main():
          {"text": "。", "startMs": 1200, "endMs": 1800, "ruby": ""}],
         True, "", japanese=False)
     _wait(90)
-    off_y = _delegate_y(2)
-    off_s = _delegate_scale(2)
+    if _rendered_text() != "收尾。":
+        print(f"FAIL: 关闭动画后词表应立即切换（不应再等 lineSwapAtMs），got {_rendered_text()!r}")
+        return 1
+    off_y, off_s = _delegate_y(2), _delegate_scale(2)
     if abs(off_y) > 0.01 or abs(off_s - 1.0) > 0.001:
         print(f"FAIL: 关闭换行与换歌动画后不应有入场位移/缩放，got y={off_y} scale={off_s}")
         return 1
@@ -1057,83 +1168,151 @@ def main():
         return 1
     print("animation: 关闭换行与换歌动画后回落到无位移的轻量淡入", flush=True)
     configs.set_pref("lyric_animation_enabled", True)
-    _wait(120)
+    _settle_line()
 
-    # ---- 换歌整组件横扫 ----
-    # 后端 _on_song_changed 的第一件事是把 state 从 "ready" 归到 "idle"，随后立刻转
-    # loading。这条 ready → idle 的下降沿就是换歌信号（首次加载 / 重试 / 改歌词源都
-    # 不会从 ready 掉回 idle）。用户换歌时整块内容向右抖出、再从左侧大幅滑入。
-    backend.set_state("idle")
-    _wait(60)
-    backend.set_state("ready")
-    _wait(1200)
-    prev_ready, _ = QQmlExpression(engine.rootContext(), root, "previousState").evaluate()
-    if prev_ready != "ready":
-        print(f"FAIL: 换歌前置条件不满足，previousState 应为 ready，got {prev_ready}")
-        return 1
-    content_row = next((o for o in root.findChildren(QObject)
-                        if o.property("objectName") == "contentRow"), None)
-    if content_row is None:
-        # 桩布局里找不到时的兜底：换歌动画挂在 sweepRow 的父容器上
-        content_row = sweep.parent()
-    if content_row is None:
-        print("FAIL: 找不到换歌动画的目标容器")
-        return 1
-
-    # 位移走 transform：contentRow 有 anchors.left，锚点会覆盖 x 属性，
-    # 用 x 做位移动画会被静默吃掉（实测 songSlideX 在动、x 恒为 0）。
-    def _row_tx():
-        v, _ = QQmlExpression(engine.rootContext(), content_row, "transform[0].x").evaluate()
-        return float(v) if v is not None else 0.0
+    # ---- 换歌：整块内容（含顶部歌名）横向非线性平移 ----
+    # 后端 _on_song_changed 的第一件事是把 state 从 "ready" 归到 "idle"，随后 _clear_line()
+    # 清空词表、再转 loading。这条 ready → idle 的下降沿就是换歌信号
+    # （首次加载 / 重试 / 改歌词源都不会从 ready 掉回 idle）。
+    # 四条契约：
+    #   a) 整组件不能在这一瞬先播退场淡出（旧实现的根因，会把横扫整个盖掉）
+    #   b) 送出窗口内主行不能被「正在获取歌词…」顶掉，否则旧行没机会滑出
+    #   c) 顶部歌名与歌词块同向同幅，且走 Material 3「强调减速」非线性曲线
+    #   d) ready 之后拿不到首行时必须有兜底，不能把整块（含间奏呼吸点）永久留在透明态
 
     # idle → ready 只是就绪，不应播横扫（否则首次加载也会晃）
-    if abs(_row_tx()) > 0.01:
-        print(f"FAIL: ready（就绪）不应触发换歌横扫，got {_row_tx()}")
+    if abs(_row_x()) > 0.01 or abs(_header_x()) > 0.01:
+        print(f"FAIL: ready（就绪）不应触发换歌横扫，got x={_row_x()}")
         return 1
 
-    # 换歌：ready → idle（真后端 _on_song_changed 的第一步）
+    # 换歌：ready → idle，紧随其后是 _clear_line() 发出的空词表 lineChanged
     backend.set_state("idle")
-    _wait(70)
-    song_x = _row_tx()
-    song_op, _ = QQmlExpression(engine.rootContext(), content_row, "opacity").evaluate()
-    if abs(song_x) < 1.0:
-        sw, _ = QQmlExpression(engine.rootContext(), root, "songSweeping").evaluate()
-        print(f"FAIL: 换歌瞬间 contentRow 应有横向位移，got x={song_x}"
-              f"（换歌动画没有触发；songSweeping={sw} "
-              f"state={backend.property('state')}）")
+    backend.set_line([], True, "")
+    # 150ms：送出动画（220ms）已走出约三成位移，采样点足够靠后又仍在窗口内。
+    # 采样太早（70ms 处 easeInCubic 才走 3%）会让断言幅度贴近阈值、容易假红。
+    _wait(150)
+    if not root.property("songTransitionHold"):
+        print("FAIL: 换歌下降沿应立起 songTransitionHold（否则整组件会先播一次退场淡出）")
         return 1
-    if float(song_op) >= 1.0:
+    if not root.property("shouldShow") or not root.property("actualVisible"):
+        print("FAIL: 换歌过渡期间组件必须保持可见，不能被 exitAnim 盖掉")
+        return 1
+    if root.property("statusTextActive"):
+        print("FAIL: 送出窗口内不应切到状态文案，否则旧行没有机会滑出")
+        return 1
+    if _rendered_text() != "收尾。":
+        print(f"FAIL: 送出窗口内应继续渲染旧行快照，got {_rendered_text()!r}")
+        return 1
+    song_x = _row_x()
+    if song_x <= 5.0:
+        print(f"FAIL: 换歌瞬间 contentRow 应有横向位移，got x={song_x}"
+              f"（state={backend.property('state')}）")
+        return 1
+    song_op = _row_op()
+    if song_op >= 0.98:
         print(f"FAIL: 换歌瞬间 contentRow 应淡出，got opacity={song_op}")
         return 1
-    print(f"animation: 换歌整块横扫 x={song_x:.1f} "
-          f"opacity={float(song_op):.2f}", flush=True)
+    header_x = _header_x()
+    if header_x <= 5.0:
+        print(f"FAIL: 顶部歌名必须随换歌一起横扫（用户明确要求），got x={header_x}")
+        return 1
+    print(f"animation: 换歌整块横扫 content x={song_x:.1f} header x={header_x:.1f} "
+          f"opacity={song_op:.2f}", flush=True)
 
+    # 新曲目的首行（真后端在 ready 之后紧接着 _sync_line 发来 lineChanged）。
+    # 送出动画还在播 → 组件把首行挂起（deferredSongLine），等送出收尾才横向映入。
     backend.set_state("ready")
+    backend.set_line(
+        [{"text": "新", "startMs": 0, "endMs": 1500, "ruby": ""},
+         {"text": "曲", "startMs": 1500, "endMs": 3000, "ruby": ""}],
+        True, "", japanese=False)
+    # 从这一刻起连续采样整段过渡（送出收尾 + 横向映入），取位移的极值。
+    # 单点采样会被动画相位抖动影响、容易假红，而这里要钉的是「方向」契约：
+    # 旧内容向右送出（正位移峰值），新内容自左侧映入（负位移峰值）。
+    max_x = 0.0
+    min_x = 0.0
+    header_max_x = 0.0
+    header_min_x = 0.0
+    saw_episode = False
+    for _ in range(40):
+        _wait(25)
+        max_x = max(max_x, _row_x())
+        min_x = min(min_x, _row_x())
+        header_max_x = max(header_max_x, _header_x())
+        header_min_x = min(header_min_x, _header_x())
+        saw_episode = saw_episode or bool(root.property("songEpisodeActive"))
+    if _rendered_text() != "新曲":
+        print(f"FAIL: 新曲目首行应渲染出来，got {_rendered_text()!r}")
+        return 1
+    if not saw_episode:
+        print("FAIL: 映入阶段 songEpisodeActive 应有一段时间为真")
+        return 1
+    if max_x < 5.0:
+        print(f"FAIL: 旧内容应向右送出（正位移峰值），got max x={max_x}")
+        return 1
+    if min_x > -5.0:
+        print(f"FAIL: 新内容应自左侧映入（负位移峰值），got min x={min_x}")
+        return 1
+    if header_max_x < 5.0 or header_min_x > -5.0:
+        print(f"FAIL: 顶部歌名应与歌词块同向横扫，"
+              f"got header x∈[{header_min_x:.1f},{header_max_x:.1f}]")
+        return 1
+    # 歌名与歌词块必须共用同一位移（同一属性驱动），否则两块会各走各的
+    if abs(_header_x() - _row_x()) > 0.5:
+        print(f"FAIL: 歌名与歌词块应共用同一位移，"
+              f"got header={_header_x()} content={_row_x()}")
+        return 1
+    print(f"animation: 换歌横向平移 —— 旧内容右出 maxX={max_x:.1f}、"
+          f"新内容左入 minX={min_x:.1f}（歌名同步）", flush=True)
+
     _wait(1200)
-    rest_x = _row_tx()
-    rest_op, _ = QQmlExpression(engine.rootContext(), content_row, "opacity").evaluate()
-    if abs(rest_x) > 0.01:
-        print(f"FAIL: 换歌动画结束后 contentRow 位移必须回 0，got {rest_x}")
+    if abs(_row_x()) > 0.01 or abs(_header_x()) > 0.01:
+        print(f"FAIL: 换歌收尾后位移必须回 0，got content={_row_x()} header={_header_x()}")
         return 1
-    if rest_op is None or abs(float(rest_op) - 1.0) > 0.001:
-        print(f"FAIL: 换歌动画结束后 contentRow.opacity 必须回 1，got {rest_op}")
+    if abs(_row_op() - 1.0) > 0.001:
+        print(f"FAIL: 换歌收尾后不透明度必须回 1，got {_row_op()}")
         return 1
-    sweeping_after, _ = QQmlExpression(engine.rootContext(), root, "songSweeping").evaluate()
-    if sweeping_after:
-        print("FAIL: 换歌动画结束后 songSweeping 必须复位，否则第二次换歌不再播放")
+    if root.property("songEpisodeActive") or root.property("songTransitionHold"):
+        print("FAIL: 换歌收尾后标志必须复位，否则第二次换歌不再播放")
         return 1
     print("animation: 换歌横扫收尾后精确归位（位移=0 / opacity=1 / 标志复位）", flush=True)
+
+    # 换歌曲线必须是 Material 3「强调减速」：起步极快、长尾缓收。
+    # 换成线性或其它缓动，0.25 处不可能已经走过一半 —— 这条立刻 FAIL。
+    curve_quarter = float(_eval(root, "emphasizedDecelerate(0.25)") or 0.0)
+    curve_end = float(_eval(root, "emphasizedDecelerate(1)") or 0.0)
+    if curve_quarter <= 0.5:
+        print(f"FAIL: 换歌应为非线性强调减速曲线（0.25 处已走出过半），got {curve_quarter:.3f}")
+        return 1
+    if abs(curve_end - 1.0) > 1e-6:
+        print(f"FAIL: 换歌曲线终值必须精确为 1，got {curve_end}")
+        return 1
 
     # 改歌词源 / 重新抓取（ready → loading，不经过 idle）不应误播换歌动画
     backend.set_state("loading")
     _wait(70)
-    src_x = _row_tx()
+    src_x = _row_x()
     if abs(src_x) > 0.01:
         print(f"FAIL: ready→loading（改歌词源/重抓）不应触发换歌动画，got x={src_x}")
         return 1
     print("animation: 仅换歌触发整块横扫（改歌词源不误播）", flush=True)
     backend.set_state("ready")
     _wait(150)
+
+    # 兜底：ready 之后拿不到首行（新曲目一上来就是长间奏时后端根本不发 lineChanged）。
+    # 没有兜底的话 songOpacity 恒为 (1-1)×1=0，整块内容（含间奏三点呼吸点）永久不可见。
+    backend.set_state("idle")
+    backend.set_line([], True, "")
+    _wait(40)
+    backend.set_state("ready")     # 故意不发 lineChanged
+    _wait(1100)
+    if abs(_row_op() - 1.0) > 0.001:
+        print(f"FAIL: ready 后拿不到首行时应有兜底把内容恢复可见，got opacity={_row_op()}")
+        return 1
+    if root.property("songEpisodeActive") or root.property("songTransitionHold"):
+        print("FAIL: 兜底收尾后过渡标志必须复位，否则整块会一直停在过渡态")
+        return 1
+    print("animation: 换歌「ready 但无首行」由兜底计时器收尾（内容不会永久透明）", flush=True)
 
     # ---- 真后端 × 真组件：间奏信号的时序契约 ----
     # 上面的间奏断言都走桩后端（set_interlude 先置位再 emit），因此掩盖了真后端

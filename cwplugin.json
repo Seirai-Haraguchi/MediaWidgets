@@ -1,11 +1,11 @@
 {
   "id": "com.seiraiharaguchi.mediawidgets",
   "name": "Media Widgets",
-  "version": "1.14.1",
+  "version": "1.15.0",
   "api_version": ">=0.6.0",
   "entry": "main.py",
   "author": "Seirai Haraguchi",
-  "description": "显示当前播放的媒体信息（Windows SMTC / Linux MPRIS），并带独立逐字歌词小组件：支持 QQ 音乐（QRC）/ 酷狗（KRC）逐字、网易云行级歌词，卡拉OK 填充与长音辉光，日语歌词振假名（平假名注音），歌词换行逐词错峰大幅入场并回弹、换歌整块横扫切换（可在设置中关闭），长间奏与长前奏显示呼吸点，无可用歌词时保留组件仅淡出隐藏；媒体与歌词小组件均可分别配置渐变背景与字体，歌词可分别为原文/译文/罗马音/日语歌词设置字体，媒体还可配置背景进度和副行。界面跟随 CW2 语言（简/繁/日/英）。",
+  "description": "显示当前播放的媒体信息（Windows SMTC / Linux MPRIS），并带独立逐字歌词小组件：支持 QQ 音乐（QRC）/ 酷狗（KRC）逐字、网易云行级歌词，卡拉OK 填充与长音辉光，日语歌词振假名（平假名注音），歌词换行「旧行滑出 + 新行逐词错峰滑入并回弹」两段式动画、换歌时歌名与歌词整块沿 Material 强调曲线横向平移切换（可在设置中关闭），长间奏与长前奏显示呼吸点，无可用歌词时保留组件仅淡出隐藏；媒体与歌词小组件均可分别配置渐变背景与字体，歌词可分别为原文/译文/罗马音/日语歌词设置字体，媒体还可配置背景进度和副行。界面跟随 CW2 语言（简/繁/日/英）。",
   "url": "https://github.com/Seirai-Haraguchi/MediaWidgets",
   "readme": "README.md",
   "icon": "icon.png",
