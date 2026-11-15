@@ -62,10 +62,10 @@ MUTATIONS = [
         "上下双行模式下副行必须显示在主行下方",
     ),
     (
-        "去掉主行的上抬让位（贴底副行直接压在主行上）",
-        "            return -Math.min(need, slack)\n",
-        "            return 0\n",
-        "上下双行时主行应上抬给贴底副行让位",
+        "上下双行时仍显示顶部歌名（该行不让位，副行没地方站）",
+        "        visible: !root.stackedTitleYield\n",
+        "        visible: true\n",
+        "上下双行时顶部歌名应隐藏",
     ),
 ]
 

@@ -230,6 +230,10 @@ Widget {
     readonly property bool stackedDualLine: pluginConfig
                                            ? pluginConfig.lyric_dual_line_layout === "stacked"
                                            : false
+    // 歌名是否要让位：只有「上下双行」且副行确实在显示时才让。
+    // 没有副行（副行内容设为不显示 / 当前没有译文或下一句 / 无歌词）时歌名照常留着，
+    // 否则卡片顶部会白白空出一块。
+    readonly property bool stackedTitleYield: stackedDualLine && stackedSubLabel.visible
 
     // 卡拉OK双色：已唱满色、未唱半透明；主文字色不用专辑主色，保证任何封面下都可读
     readonly property color sungColor: Rin.Theme.isDark() ? "#FFFFFF" : "#1B1B1B"
@@ -250,9 +254,21 @@ Widget {
     // 自绘歌名：位移 / 不透明度直接挂在 Subtitle 上。
     // 切勿再套一层 Item 外壳 —— subtitle 是 subtitleArea.children 的**列表别名**，
     // 外壳会让槽位里多出一层容器，布局与对齐都会跟着漂（内置组件都是直挂）。
+    //
+    // 上下双行时整行隐藏：那一行的位置要留给副行（译文 / 下一句），而卡片高度是
+    // 框架给的固定值，歌名与副行只能二选一。歌名本身不是必要信息 ——
+    // 播放器里本来就看得见，歌词组件优先给歌词腾地方。
+    // 注意框架 headerRow 的 visible 判据看的是 subtitle.length（槽位里**有**该项），
+    // 不看该项自身可见性：隐藏后这一行高度归零、布局自动上移，不会有空白残留。
     subtitle: Subtitle {
         id: headerLabel
         objectName: "headerLabel"
+        visible: !root.stackedTitleYield
+        // 只把 visible 置假不够：框架的 headerRow 仍按这一项占着约 16px 高
+        // （实测行高层层跟随、把子项 visible / Layout.preferredHeight 压到 0
+        // 都不收），于是歌名那块变成一条空白。高度一并归零，至少不留下排版痕迹；
+        // 那条空白由 contentRow 的居中补差吃掉（见那里的注释）。
+        height: root.stackedTitleYield ? 0 : implicitHeight
         text: root.backend && root.hasMedia ? root.media.title : qsTr("Lyrics")
         // 框架 Subtitle 自带 opacity: 0.6，这里在它之上叠换歌的淡出淡入
         opacity: 0.6 * root.songOpacity
@@ -792,26 +808,26 @@ Widget {
     //
     // 外层是 ColumnLayout：双行排布有两种（见 stackedDualLine）——
     //   divider：主行与副行并排（内层 primaryRow，主行右侧 2px 分割线 + 副行）
-    //   stacked：副行**不进这条内容行**，而是贴到组件下缘单独成一行的叠加层
-    //           （见下面的 stackedSubLabel），主行因此始终独占宽度与行高。
+    //   stacked：主行在上、副行在下（副行挂到 ColumnLayout 的第二行），
+    //           顶上那行歌名同时隐藏，把整行高度让给歌词（见 headerLabel.visible）
     // 两种排布下的主行/间奏点/状态文案共用同一份 primaryRow，不复制 WordSweep。
     ColumnLayout {
         id: contentRow
         objectName: "contentRow"
         anchors.left: parent.left
         anchors.verticalCenter: parent.verticalCenter
+        // 上下双行的两行之间留 3px
+        spacing: root.stackedDualLine ? 3 : 0
         visible: root.shouldShow
 
-        // 上下双行时主行整体上抬半行，给贴底的副行让位（合起来看才是居中的两行块）。
-        // 上抬量按内容区余量钳位：空间紧就只抬到主行仍留在内容区里为止，
-        // 绝不把主行推出上缘（卡片高度是框架给的，不同主题下并不一致）。
-        anchors.verticalCenterOffset: {
-            if (!stackedSubLabel.visible)
-                return 0
-            var need = (stackedSubLabel.height + 3) / 2
-            var slack = Math.max(0, (parent.height - primaryRow.height) / 2)
-            return -Math.min(need, slack)
-        }
+        // 上下双行时歌名整行隐藏，但框架那一行的高度收不干净（见 headerLabel.height
+        // 的注释），内容区因此整体下移、顶上留一条空白。这里把歌词块从「内容区居中」
+        // 改成「卡片居中」：补掉内容区中心与卡片中心的差值，两行歌词就正着落在卡片
+        // 中间。这个差值随框架实际留白自算，歌名行要是能被收干净，它就自动收敛到 0。
+        anchors.verticalCenterOffset: root.stackedTitleYield
+                                      ? Math.round(root.height / 2
+                                          - parent.mapToItem(root, 0, parent.height / 2).y)
+                                      : 0
 
         // 换歌横扫（横向，Material 强调曲线）× 换行抬升（纵向）× 淡入淡出，
         // 静息时位移为 0、不透明度为 1，对常规布局零影响。
@@ -932,38 +948,26 @@ Widget {
                              ? root.translationFontWeight : root.originalFontWeight
             }
         }
-    }
 
-    // 副行（上下双行排布）：**不在 contentRow 里**，而是贴到内容区下缘单独占一行。
-    // 为什么不放进内容行：卡片高度是框架给的固定值（正常约 100 / mini 56），
-    // 内容区往往只剩主行那么高，多出来的一行塞进布局会被顶出边界（实测在宿主里
-    // 直接看不见）。改成像媒体组件的背景时间水印那样贴底摆放，就只借用卡片下缘
-    // 那点留白，不参与主行的布局分配。
-    // 主行一侧用 anchors.verticalCenterOffset 上抬半行让位（见 contentRow），
-    // 两行合起来仍是视觉居中的一块。
-    //
-    // 与主行同一个坐标系（contentArea），所以左对齐就是 anchors.left: parent.left。
-    // 宽度上限跟主行走（不低于 200）：两行读起来是一个块，副行比主行还宽会很怪；
-    // 超宽仍由 MarqueeTitle 自己跑马灯滚动。
-    MarqueeTitle {
-        id: stackedSubLabel
-        objectName: "stackedSubtitleLabel"
-        visible: root.stackedDualLine && !miniMode && sweepRow.visible && text !== ""
-        anchors.left: parent.left
-        anchors.bottom: parent.bottom
-        text: root.shownSubLine
-        maximumWidth: Math.max(200, sweepRow.width)
-        speed: 80
-        // 换行 / 换歌时与主行一起淡出淡入（它已经不在 contentRow 里，
-        // 拿不到那份 opacity，需要自己接上）；不做纵向位移，避免贴底时被裁掉。
-        opacity: (root.shownSubIsTranslation ? 0.62 : 0.38) * root.lyricOpacity
-        transform: Translate { x: root.lyricSlideX }
-        font.family: root.shownSubIsTranslation
-                     ? root.translationFontFamily : root.originalFontFamily
-        font.weight: root.shownSubIsTranslation
-                     ? root.translationFontWeight : root.originalFontWeight
-        // 比主行小一号（0.55 倍）：贴底这一行不能压到主行的下部字形
-        font.pixelSize: Math.max(10, Math.round(root.titlePx * 0.55))
+        // 副行（上下双行排布）：挂在主行下方、与主行左对齐，作为内容行的第二行参与布局。
+        // 顶上那行歌名此时已隐藏，腾出的正是这一行的高度，所以不会再被顶出卡片。
+        // 字号比主行小一号：两行要读出主次，且总高度仍要落在内容区里。
+        // 宽度上限跟主行走（不低于 200）：两行读起来是一个块，副行比主行还宽会很怪；
+        // 超宽仍由 MarqueeTitle 自己跑马灯滚动。
+        MarqueeTitle {
+            id: stackedSubLabel
+            objectName: "stackedSubtitleLabel"
+            visible: root.stackedDualLine && !miniMode && sweepRow.visible && text !== ""
+            text: root.shownSubLine
+            maximumWidth: Math.max(200, sweepRow.width)
+            speed: 80
+            opacity: root.shownSubIsTranslation ? 0.62 : 0.38
+            font.family: root.shownSubIsTranslation
+                         ? root.translationFontFamily : root.originalFontFamily
+            font.weight: root.shownSubIsTranslation
+                         ? root.translationFontWeight : root.originalFontWeight
+            font.pixelSize: Math.max(10, Math.round(root.titlePx * 0.55))
+        }
     }
 
     // 逐字卡拉OK行：底层未唱文字 + 顶层已唱文字按词宽裁切，随 positionMs 填充；

@@ -721,7 +721,13 @@ def main():
         return 1
     reserve_divider, _ = QQmlExpression(engine.rootContext(), sweep,
                                         "secondaryReserve").evaluate()
-    divider_main_y = _oy(content_row_box)
+    header_label = _find("headerLabel")
+    if header_label is None:
+        print("FAIL: 找不到顶部歌名 headerLabel")
+        return 1
+    if not header_label.property("visible"):
+        print("FAIL: 分割线模式下顶部歌名应正常显示")
+        return 1
     print(f"dual-line: 分割线分割 —— 竖线可见，副行 (x={_ox(inline_sub):.1f}, "
           f"y={_oy(inline_sub):.1f}) 与主行同带，reserve={reserve_divider}", flush=True)
 
@@ -735,12 +741,12 @@ def main():
     if not stacked_sub.property("visible"):
         print("FAIL: 上下双行模式下副行必须显示在主行下方")
         return 1
-    # 主行必须真的上抬让位（副行贴底，主行不动就会压在一起）。
-    # 判据用 contentRow 的 y（它与贴底副行同在 contentArea 坐标系；primaryRow 的 y
-    # 是相对 contentRow 的，恒为 0，看不出上抬）。去掉 verticalCenterOffset 立刻 FAIL。
-    if _oy(content_row_box) > divider_main_y - 1.0:
-        print(f"FAIL: 上下双行时主行应上抬给贴底副行让位，"
-              f"y={_oy(content_row_box):.1f}（分割线模式下 {divider_main_y:.1f}）")
+    # 歌名整行让位：那一行的高度要留给副行，卡不住两个副行（用户明确要求）
+    if header_label.property("visible"):
+        print("FAIL: 上下双行时顶部歌名应隐藏（把整行让给副行）")
+        return 1
+    if float(header_label.property("height") or 0) > 0.01:
+        print(f"FAIL: 上下双行时歌名高度应归零，got {header_label.property('height')}")
         return 1
     # 两行不许叠在一起。主行的实际底边 = contentRow.y + primaryRow.y + 行高
     main_bottom = (_oy(content_row_box) + _oy(primary_row)
@@ -758,7 +764,7 @@ def main():
     sub_px = float(_eval(stacked_sub, "font.pixelSize"))
     main_px = float(_eval(root, "titlePx"))
     if not (sub_px < main_px * 0.75 and sub_px >= 10):
-        print(f"FAIL: 上下双行的副行字号应小于主行（约 0.6 倍），got {sub_px} vs {main_px}")
+        print(f"FAIL: 上下双行的副行字号应小于主行（约 0.55 倍），got {sub_px} vs {main_px}")
         return 1
     # 副行不再占横向额度
     reserve_stacked, err_rs = QQmlExpression(engine.rootContext(), sweep,
@@ -781,7 +787,7 @@ def main():
           f"y={_oy(stacked_sub):.1f}, px={sub_px:.0f})，竖线收起，reserve=0，"
           f"bottomsub={_bottom(stacked_sub):.1f}/{root_h:.0f}", flush=True)
 
-    # 切回分割线：右侧副行与竖线必须回来，下方副行收起
+    # 切回分割线：右侧副行与竖线必须回来，下方副行收起，歌名也要回来
     configs.set_pref("lyric_dual_line_layout", "divider")
     _wait(150)
     if not divider.property("visible") or not inline_sub.property("visible"):
@@ -790,7 +796,10 @@ def main():
     if stacked_sub.property("visible"):
         print("FAIL: 切回分割线模式后下方副行未收起")
         return 1
-    print("dual-line: 排布模式可双向切换（配置即时生效）", flush=True)
+    if not header_label.property("visible"):
+        print("FAIL: 切回分割线模式后顶部歌名未恢复")
+        return 1
+    print("dual-line: 排布模式可双向切换（配置即时生效，歌名随之隐藏/恢复）", flush=True)
     _settle_line()
 
     # 行级歌词：不应启用卡拉OK裁切层；fillRatio 恒为 1
