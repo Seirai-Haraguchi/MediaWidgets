@@ -545,7 +545,9 @@ def main():
     # 组件刻意把「词表 / 副行 / 日语字体」的切换延后到换行后的 lineSwapAtMs，
     # 先让旧行滑出去再换词（见 LyricsWidget.commitPendingLine）。
     # 所有「换行之后读新行内容」的断言都必须越过这个切换点，否则读到的是上一行快照。
-    LINE_SETTLE_MS = 200 + 280
+    # 取值要盖住整段换行动画：送出 140 + 映入预算 300 = 440ms（见 lineEnterBudgetMs），
+    # 再留 40ms 余量。调时长预算时这里要同步跟上。
+    LINE_SETTLE_MS = 480
 
     def _settle_line():
         _wait(LINE_SETTLE_MS)
@@ -1074,16 +1076,22 @@ def main():
          {"text": "还", "startMs": 600, "endMs": 1200, "ruby": ""},
          {"text": "下", "startMs": 1200, "endMs": 1800, "ruby": ""}],
         True, "", japanese=False)
-    # 110ms 落在送出窗口内（lineSwapAtMs=200），离切换点还有 90ms 余量。
+    # 采样点按 lineSwapAtMs 现算，不写死：换行时长是调优参数（见 LyricsWidget 的
+    # 时长预算注释），写死会在每次调参时假红。
     # 这里不能用 app.processEvents()——它不推进 QAbstractAnimation 的时钟，
     # 进度会停在 0（假 FAIL），必须跑真事件循环。
-    _wait(110)
+    swap_ms = int(_eval(root, "lineSwapAtMs") or 0)
+    if swap_ms < 40:
+        print(f"FAIL: lineSwapAtMs 异常（{swap_ms}ms），送出阶段无从观察")
+        return 1
+    exit_probe_ms = swap_ms // 2
+    _wait(exit_probe_ms)
     if _rendered_text() != old_text:
         print(f"FAIL: 换行送出阶段就换掉了词表，旧行根本没机会滑出 —— "
               f"got {_rendered_text()!r} want {old_text!r}")
         return 1
     if _eval(root, "lineSwapDone"):
-        print("FAIL: 110ms 时尚未到切换点，lineSwapDone 不应为真")
+        print(f"FAIL: {exit_probe_ms}ms 时尚未到切换点，lineSwapDone 不应为真")
         return 1
     exit_y = _row_y()
     if exit_y >= -5.0:
@@ -1097,7 +1105,8 @@ def main():
           f"y={exit_y:.1f} opacity={exit_op:.2f}", flush=True)
 
     # === a-2) 换行「映入」：切换点之后新行自下方错峰落位 ===
-    _wait(160)   # 累计约 250ms，越过 lineSwapAtMs=200，进入映入阶段
+    # 只越过切换点 30ms：再往后靠后的词就开始落地了，位移幅度会被吃掉（假红）。
+    _wait(swap_ms - exit_probe_ms + 30)
     new_text = _rendered_text()
     if new_text != "雨还下":
         print(f"FAIL: 越过切换点后应换上新的词表，got {new_text!r}")

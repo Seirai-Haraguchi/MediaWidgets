@@ -349,21 +349,32 @@ Widget {
     // 前 lineSwapAtMs 是「送出」阶段（画面里仍是旧行），之后是「映入」阶段（新行）。
     property real linePulse: 1
     property var pendingLine: null
-    readonly property int lineSwapAtMs: 200
-    readonly property int lineWordSpanMs: 400
+    // 时长预算（整段换行 = 送出 + 映入，控制在 ~340–450ms 内）：
+    // 旧值 200 + 400 + 错峰 ≈ 830ms（十来个词的行），一句歌词往往只有 2–3s，
+    // 近三分之一的时间都在动，观感拖沓。这里把「映入」压成固定预算：
+    // 词再多也只是把错峰间距收紧，总时长不跟着膨胀。
+    readonly property int lineSwapAtMs: 140
+    // 单个词的落位时长
+    readonly property int lineWordSpanMs: 200
+    // 映入总预算（含全部错峰）：最后落地的词刚好压在预算末尾
+    readonly property int lineEnterBudgetMs: 300
 
     // 本次换行的时长参数在**开始时一次性定死**，不随 shownWords 现算：
     // 切换点一到 shownWords 就换成新行，若时长跟着新行词数重算，
     // lineElapsedMs = linePulse × 时长 会在动画中途跳一下（进度不连续），
     // 入场会「抽搐」一次。定死之后 linePulseAnim.duration 全程不变。
-    property int activeWordStaggerMs: 26
-    property int activeEnterWindowMs: 400
+    property int activeWordStaggerMs: 0
+    property int activeEnterWindowMs: 300
     property int activePulseDuration: 1
 
-    // 逐词错峰间距：词多则压缩，保证最后一个词也落在映入窗口内
+    // 逐词错峰间距：把「预算 − 单词落位时长」均分给词间间隔，
+    // 词多则自动收紧（下限 6ms），总时长恒定 —— 不再随词数越拖越长。
     function wordStaggerFor(wordCount) {
         var n = Math.max(1, wordCount)
-        return Math.max(12, Math.min(52, Math.round(260 / n)))
+        if (n < 2)
+            return 0
+        return Math.max(6, Math.min(30,
+                                     Math.round((lineEnterBudgetMs - lineWordSpanMs) / (n - 1))))
     }
 
     readonly property real lineElapsedMs: linePulse * activePulseDuration
@@ -685,6 +696,8 @@ Widget {
         linePulse = 0
         var count = (words && words.length) ? words.length : 1
         activeWordStaggerMs = wordStaggerFor(count)
+        // 映入窗口 = 单词落位 + 全部错峰：驱动器与最后一个词的落位精确同时结束，
+        // 既没有「词都落完还在空转」的长尾，也不会在末词差半拍时被 linePulse 截断。
         activeEnterWindowMs = lineWordSpanMs + activeWordStaggerMs * (count - 1)
         activePulseDuration = lineSwapAtMs + activeEnterWindowMs
         pendingLine = line
@@ -1090,13 +1103,14 @@ Widget {
                     implicitHeight: rubyHeight + baseText.height
 
                     // ---- 换行逐词入场（「炫酷 / 灵动 / 大幅度」的核心） ----
-                    // 每个词自带 delay 错峰入场，位移取行高的 34%，缩放 1.32 → 1
-                    // 走过冲回弹；两者都只在换行后的 760ms 内变化，随后恒为终态，
-                    // 不影响卡拉OK 填充与跑马灯。
+                    // 每个词自带 delay 错峰入场，位移取字号的 95%，缩放 1.32 → 1
+                    // 走过冲回弹；两者都只在换行后的一段窗口内变化，随后恒为终态，
+                    // 不影响卡拉OK 填充与跑马灯。落位时长与错峰预算同源（见
+                    // lineWordSpanMs / lineEnterBudgetMs），改预算不会漏改这里。
                     // 位移必须走 transform，不能写 `y:` —— delegate 是 Row 的子项，
                     // Row 的布局每次都会把 y 重设回 0，直接写 y 属性会被无声吃掉。
                     readonly property real enterProgress: root.wordEnterProgress(
-                        index, index * root.activeWordStaggerMs, 460)
+                        index, index * root.activeWordStaggerMs, root.lineWordSpanMs)
                     // 越靠后的词错峰越晚，用同一 Easing.OutBack 做一次速度归零的落地，
                     // 否则「迟到的词」看起来只是淡入，没有冲进来的感觉
                     readonly property real enterEased: root.easeOutBack(enterProgress)
