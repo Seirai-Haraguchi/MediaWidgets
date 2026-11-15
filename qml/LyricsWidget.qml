@@ -225,6 +225,11 @@ Widget {
     readonly property bool lyricAnimationsEnabled: pluginConfig
                                                    ? pluginConfig.lyric_animation_enabled !== false
                                                    : true
+    // 双行排布：divider = 副行在原文右侧、中间 2px 分割线（沿用 CW2 动态通知的排法）；
+    // stacked = 副行落在原文下方，两行上下堆叠，主行可独占整个宽度额度
+    readonly property bool stackedDualLine: pluginConfig
+                                           ? pluginConfig.lyric_dual_line_layout === "stacked"
+                                           : false
 
     // 卡拉OK双色：已唱满色、未唱半透明；主文字色不用专辑主色，保证任何封面下都可读
     readonly property color sungColor: Rin.Theme.isDark() ? "#FFFFFF" : "#1B1B1B"
@@ -626,7 +631,10 @@ Widget {
     // 会把光带画到组件顶部去（sweepRow 的坐标相对 contentRow，而 contentRow 又被
     // contentArea 的左内边距与 header 行高整体下移）。光带宽度收在行宽以内，
     // 不再扫到组件外面。
-    readonly property point sweepOriginPoint: contentRow.mapToItem(root, sweepRow.x, sweepRow.y)
+    // 取 sweepRow 自己的坐标原点换算（而不是 contentRow.mapToItem(root, sweepRow.x, …)）：
+    // 上下双行模式下 sweepRow 嵌在 contentRow 的内层 RowLayout 里，x/y 是相对内层行的，
+    // 当 contentRow 坐标用会整体偏移一格。
+    readonly property point sweepOriginPoint: sweepRow.mapToItem(root, 0, 0)
     readonly property real sweepBarWidth: Math.max(24, sweepRow.width * 0.28)
 
     Rectangle {
@@ -781,12 +789,19 @@ Widget {
     // 与 MediaWidget 相同：不能锚定右侧，内容行自然撑开组件宽度，超上限由框架裁切兜底
     // 注意：contentRow 有 anchors.left，锚点会**覆盖 x 属性**，写 x 做位移动画无效。
     // 换歌横扫必须走 transform（锚点管不到 transform），与逐词入场的位移同一处理。
-    RowLayout {
+    //
+    // 外层是 ColumnLayout 而不是 RowLayout：双行排布有两种（见 stackedDualLine）——
+    //   divider：主行与副行并排（内层 primaryRow，主行右侧 2px 分割线 + 副行）
+    //   stacked：主行在上、副行在下（副行挂到 ColumnLayout 的第二行）
+    // 两种排布下的主行/间奏点/状态文案共用同一份 primaryRow，不复制 WordSweep。
+    ColumnLayout {
         id: contentRow
         objectName: "contentRow"
         anchors.left: parent.left
         anchors.verticalCenter: parent.verticalCenter
-        spacing: 8
+        // 上下双行时两行之间留 3px：组件卡片高度由框架给定（正常 100 / mini 56），
+        // 多出来的一行已经占去约 17px，行距再放宽就会顶出卡片。
+        spacing: root.stackedDualLine ? 3 : 0
         visible: root.shouldShow
 
         // 换歌横扫（横向，Material 强调曲线）× 换行抬升（纵向）× 淡入淡出，
@@ -796,107 +811,137 @@ Widget {
         opacity: root.lyricOpacity
         transform: Translate { x: root.lyricSlideX; y: root.lyricSlideY }
 
-        // 当前行：状态文案 与 逐字扫描 二选一，同为 Title 标尺
-        // 状态文案用框架 Title（CW2 内置组件的占位写法，如 Nothing right now）
-        Title {
-            id: statusText
-            visible: root.statusTextActive
-            text: {
-                if (!backend)
-                    return ""
-                if (!root.hasMedia)
-                    return qsTr("未在播放")
-                switch (root.observedState) {
-                case "loading": return qsTr("正在获取歌词…")
-                case "nomatch": return qsTr("未找到这首歌的歌词")
-                case "error": return qsTr("歌词获取失败")
-                default: return ""
+        RowLayout {
+            id: primaryRow
+            objectName: "primaryRow"
+            spacing: 8
+
+            // 当前行：状态文案 与 逐字扫描 二选一，同为 Title 标尺
+            // 状态文案用框架 Title（CW2 内置组件的占位写法，如 Nothing right now）
+            Title {
+                id: statusText
+                visible: root.statusTextActive
+                text: {
+                    if (!backend)
+                        return ""
+                    if (!root.hasMedia)
+                        return qsTr("未在播放")
+                    switch (root.observedState) {
+                    case "loading": return qsTr("正在获取歌词…")
+                    case "nomatch": return qsTr("未找到这首歌的歌词")
+                    case "error": return qsTr("歌词获取失败")
+                    default: return ""
+                    }
                 }
+                color: root.unsungColor
             }
-            color: root.unsungColor
-        }
 
-        // 换行时字从下方大幅滑入（幅度大、回弹足），旧版只有 0.35→1 的淡入。
-        // contentRow 是 verticalCenter：这里给 WordSweep 加位移不会改变行高，
-        // 副行与那条 2px 分隔线不会被带着走（与「隐藏只归零宽度、绝不归零高度」同一约束）。
-        WordSweep {
-            id: sweepRow
-            visible: !statusText.visible && !root.interludeActive
-            // 内容驱动撑宽：主行最多 480；副行可见时从其额度扣掉副行块（含分隔线间距），
-            // 副行关闭后额度还给主行，组件可横向扩展到满幅可用宽度。
-            // 切勿绑定 root.width——会形成「宽度由内容决定、内容上限又跟宽度走」的死锁，
-            // 导致副行关闭后主行仍卡在窄视口、只能靠跑马灯硬滚。
-            readonly property real secondaryReserve: subLabel.visible ? (subLabel.width + 18) : 0
-            // 短行按字宽撑开；长行顶到 maximumWidth 后由跑马灯滚动
-            readonly property real mainMaxWidth: Math.max(120, 480 - secondaryReserve)
-            Layout.maximumWidth: mainMaxWidth
-            // 渲染词表读**快照**而不是 backend.words：后端在 emit lineChanged 之前
-            // 就已把 words 换成新行，直接绑后端的话旧行在通知到达时已经不存在，
-            // 「滑出」根本没东西可动。快照由 applyLine / commitPendingLine 掌握时机。
-            words: root.shownWords
-            wordTiming: root.shownWordTiming
-            positionMs: backend ? backend.positionMs : 0
-            baseColor: root.unsungColor
-            fillColor: root.sungColor
-            pixelSize: root.titlePx
-            fontFamily: root.originalFontFamily
-            fontWeight: root.originalFontWeight
-            lineIsJapanese: root.shownLineIsJapanese
-            furiganaEnabled: root.furiganaEnabled
-            japaneseFontFamily: root.japaneseFontFamily
-            japaneseFontWeight: root.japaneseFontWeight
+            // 换行时字从下方大幅滑入（幅度大、回弹足），旧版只有 0.35→1 的淡入。
+            // contentRow 是 verticalCenter：这里给 WordSweep 加位移不会改变行高，
+            // 副行与那条 2px 分隔线不会被带着走（与「隐藏只归零宽度、绝不归零高度」同一约束）。
+            WordSweep {
+                id: sweepRow
+                visible: !statusText.visible && !root.interludeActive
+                // 内容驱动撑宽：主行最多 480；副行可见时从其额度扣掉副行块（含分隔线间距），
+                // 副行关闭后额度还给主行，组件可横向扩展到满幅可用宽度。
+                // 上下双行时副行在下方、不占主行横向空间，额度始终是 480。
+                // 切勿绑定 root.width——会形成「宽度由内容决定、内容上限又跟宽度走」的死锁，
+                // 导致副行关闭后主行仍卡在窄视口、只能靠跑马灯硬滚。
+                readonly property real secondaryReserve: subLabel.visible ? (subLabel.width + 18) : 0
+                // 短行按字宽撑开；长行顶到 maximumWidth 后由跑马灯滚动
+                readonly property real mainMaxWidth: Math.max(120, 480 - secondaryReserve)
+                Layout.maximumWidth: mainMaxWidth
+                // 渲染词表读**快照**而不是 backend.words：后端在 emit lineChanged 之前
+                // 就已把 words 换成新行，直接绑后端的话旧行在通知到达时已经不存在，
+                // 「滑出」根本没东西可动。快照由 applyLine / commitPendingLine 掌握时机。
+                words: root.shownWords
+                wordTiming: root.shownWordTiming
+                positionMs: backend ? backend.positionMs : 0
+                baseColor: root.unsungColor
+                fillColor: root.sungColor
+                pixelSize: root.titlePx
+                fontFamily: root.originalFontFamily
+                fontWeight: root.originalFontWeight
+                lineIsJapanese: root.shownLineIsJapanese
+                furiganaEnabled: root.furiganaEnabled
+                japaneseFontFamily: root.japaneseFontFamily
+                japaneseFontWeight: root.japaneseFontWeight
 
-            // 整体呼吸缩放：整行一个值（取自算力最省的「全行入场均值」），
-            // 不逐词算——逐词缩放会让同行各词大小不一，观感像渲染错误。
-            // 换行后只做一次 1.05 → 1 的回落，随后恒为 1，不影响卡拉OK 扫描。
-            // 注意：不能用 baseText.height（首帧还未布局，会得到 NaN 并把整个
-            // delegate 的 scale 污染成 NaN，入场动画直接消失）。
-            readonly property real lineEnterScale: {
-                if (!root.lyricAnimationsEnabled || root.linePulse >= 1)
-                    return 1
-                // 起步略过冲再回落，给出「弹一下」的灵动感；
-                // 送出阶段 lineEnterProgress 恒为 0，缩放保持 1 不起伏
-                return 1 + 0.06 * Math.sin(Math.PI * Math.min(1, root.lineEnterProgress * 1.15))
+                // 整体呼吸缩放：整行一个值（取自算力最省的「全行入场均值」），
+                // 不逐词算——逐词缩放会让同行各词大小不一，观感像渲染错误。
+                // 换行后只做一次 1.05 → 1 的回落，随后恒为 1，不影响卡拉OK 扫描。
+                // 注意：不能用 baseText.height（首帧还未布局，会得到 NaN 并把整个
+                // delegate 的 scale 污染成 NaN，入场动画直接消失）。
+                readonly property real lineEnterScale: {
+                    if (!root.lyricAnimationsEnabled || root.linePulse >= 1)
+                        return 1
+                    // 起步略过冲再回落，给出「弹一下」的灵动感；
+                    // 送出阶段 lineEnterProgress 恒为 0，缩放保持 1 不起伏
+                    return 1 + 0.06 * Math.sin(Math.PI * Math.min(1, root.lineEnterProgress * 1.15))
+                }
+                transformOrigin: Item.Center
+                scale: lineEnterScale
             }
-            transformOrigin: Item.Center
-            scale: lineEnterScale
+
+            // 间奏：三个呼吸点占住主行的位置，间奏结束后换回下一句歌词
+            InterludeDots {
+                id: interludeDots
+                objectName: "interludeDots"
+                visible: root.interludeActive
+                startMs: backend ? backend.interludeStartMs : 0
+                endMs: backend ? backend.interludeEndMs : 0
+                positionMs: backend ? backend.positionMs : 0
+                color: root.sungColor
+                pixelSize: root.titlePx
+            }
+
+            // 正文与副文本之间的 2px 分隔线（dynamicNotification 同款）；
+            // 上下双行模式下副行不在这一行，分割线自动收起
+            Rectangle {
+                objectName: "subtitleDivider"
+                visible: subLabel.visible
+                Layout.preferredWidth: 2
+                Layout.leftMargin: 4
+                Layout.rightMargin: 4
+                Layout.fillHeight: true
+                color: Rin.Theme.isDark() ? Qt.alpha("#FFFFFF", 0.28) : Qt.alpha("#000000", 0.18)
+            }
+
+            // 副行（分割线排布）：译文更亮、下一句预览更暗；MarqueeTitle 超宽自动跑马灯
+            // 回退到原文/下一句时仍用原文字体设置（仅真实译文走译文字体）
+            MarqueeTitle {
+                id: subLabel
+                objectName: "subtitleLabel"
+                visible: !miniMode && !root.stackedDualLine && sweepRow.visible && text !== ""
+                text: root.shownSubLine
+                maximumWidth: 200
+                speed: 100
+                opacity: root.shownSubIsTranslation ? 0.62 : 0.38
+                font.family: root.shownSubIsTranslation
+                             ? root.translationFontFamily : root.originalFontFamily
+                font.weight: root.shownSubIsTranslation
+                             ? root.translationFontWeight : root.originalFontWeight
+            }
         }
 
-        // 间奏：三个呼吸点占住主行的位置，间奏结束后换回下一句歌词
-        InterludeDots {
-            id: interludeDots
-            objectName: "interludeDots"
-            visible: root.interludeActive
-            startMs: backend ? backend.interludeStartMs : 0
-            endMs: backend ? backend.interludeEndMs : 0
-            positionMs: backend ? backend.positionMs : 0
-            color: root.sungColor
-            pixelSize: root.titlePx
-        }
-
-        // 正文与副文本之间的 2px 分隔线（dynamicNotification 同款）
-        Rectangle {
-            visible: subLabel.visible
-            Layout.preferredWidth: 2
-            Layout.leftMargin: 4
-            Layout.rightMargin: 4
-            Layout.fillHeight: true
-            color: Rin.Theme.isDark() ? Qt.alpha("#FFFFFF", 0.28) : Qt.alpha("#000000", 0.18)
-        }
-
-        // 副行：译文更亮、下一句预览更暗；MarqueeTitle 超宽自动跑马灯
-        // 回退到原文/下一句时仍用原文字体设置（仅真实译文走译文字体）
+        // 副行（上下双行排布）：挂在主行下方、与主行左对齐。
+        // 字号取主行字号的 0.6 倍——卡片高度是框架给的固定值，副行若沿用原尺寸
+        // （约 0.75 倍主行）会把整块顶出卡片下缘。
+        // 宽度上限跟主行走（不低于 200）：两行读起来是一个块，副行比主行还宽会很怪；
+        // 超宽仍由 MarqueeTitle 自己跑马灯滚动。
         MarqueeTitle {
-            id: subLabel
-            visible: !miniMode && sweepRow.visible && text !== ""
+            id: stackedSubLabel
+            objectName: "stackedSubtitleLabel"
+            visible: root.stackedDualLine && !miniMode && sweepRow.visible && text !== ""
             text: root.shownSubLine
-            maximumWidth: 200
-            speed: 100
+            maximumWidth: Math.max(200, sweepRow.width)
+            speed: 80
             opacity: root.shownSubIsTranslation ? 0.62 : 0.38
             font.family: root.shownSubIsTranslation
                          ? root.translationFontFamily : root.originalFontFamily
             font.weight: root.shownSubIsTranslation
                          ? root.translationFontWeight : root.originalFontWeight
+            font.pixelSize: Math.max(10, Math.round(root.titlePx * 0.6))
         }
     }
 

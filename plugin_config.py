@@ -32,6 +32,8 @@ class MediaWidgetsConfig(ConfigBaseModel):
     lyric_gradient_intensity: int = 100
     # 歌词组件副行：translation_or_next / translation_or_none / next / none
     lyric_subtitle_content: str = "translation_or_next"
+    # 双行排布：divider（副行在原文右侧，中间 2px 分割线）/ stacked（副行在原文下方）
+    lyric_dual_line_layout: str = "divider"
 
     # 日语歌词振假名（ruby）显示开关；无假名数据时自动隐藏
     lyric_furigana_enabled: bool = True

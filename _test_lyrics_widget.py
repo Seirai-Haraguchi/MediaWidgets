@@ -552,6 +552,9 @@ def main():
     def _settle_line():
         _wait(LINE_SETTLE_MS)
 
+    def _eval(obj, expression):
+        return QQmlExpression(engine.rootContext(), obj, expression).evaluate()[0]
+
     # 超长逐字行（远超 480px），用于触发跑马灯
     long_words = [
         {"text": "这一句歌词特别特别长用来触发跑马灯滚动效果一二三四五六七八九十",
@@ -654,6 +657,129 @@ def main():
         print(f"FAIL: secondary off → main maxWidth should be 480, got {max_via_expr} err={err_m}")
         return 1
     print("width: secondary off restores main maxWidth=480", flush=True)
+
+    # ---- 双行排布：分割线分割 / 上下双行 ----
+    # 两种排布共用同一份主行（primaryRow），副行分别挂在「主行右侧」与「主行下方」。
+    # 断言全部打在**几何**上：分割线模式两行并排（纵向同带、副行在右、竖线可见）；
+    # 上下双行模式副行必须落在主行下方且与主行左对齐，竖线与右侧副行都要收起，
+    # 同时主行额度要回到 480（副行不再占横向空间）。
+    backend.set_line(
+        [{"text": "晴", "startMs": 0, "endMs": 1000},
+         {"text": "天", "startMs": 1000, "endMs": 2000}],
+        word_timing=True,
+        sub_line="Sunny day",
+    )
+    backend.set_position(300)
+    _settle_line()
+
+    def _find(name):
+        return next((o for o in root.findChildren(QObject)
+                     if o.property("objectName") == name), None)
+
+    divider = _find("subtitleDivider")
+    inline_sub = _find("subtitleLabel")
+    stacked_sub = _find("stackedSubtitleLabel")
+    primary_row = _find("primaryRow")
+    if None in (divider, inline_sub, stacked_sub, primary_row):
+        print(f"FAIL: 双行排布缺少部件 divider={divider} inline={inline_sub} "
+              f"stacked={stacked_sub} primary={primary_row}")
+        return 1
+
+    def _ox(item):
+        return float(item.property("x") or 0.0)
+
+    def _oy(item):
+        return float(item.property("y") or 0.0)
+
+    def _bottom(item):
+        return _oy(item) + float(item.property("height"))
+
+    def _center_y(item):
+        return _oy(item) + float(item.property("height")) / 2.0
+
+    # 这几个项都直接挂在同一个 Item（contentArea）下：QQuickLayout 不是 Item，
+    # 布局里的子项 visual parent 会被挂到布局的父 Item 上，所以 y/x 处在同一坐标系，
+    # 可以直接比较（mapToItem 在 QQmlExpression 里解析不到文件内 id，用不了）。
+
+    # 默认就是分割线模式
+    if not divider.property("visible") or not inline_sub.property("visible"):
+        print(f"FAIL: 默认应为分割线模式（竖线 + 右侧副行），"
+              f"divider={divider.property('visible')} inline={inline_sub.property('visible')}")
+        return 1
+    if stacked_sub.property("visible"):
+        print("FAIL: 分割线模式下不应显示下方副行")
+        return 1
+    if abs(_center_y(inline_sub) - _center_y(primary_row)) > 6.0:
+        print(f"FAIL: 分割线模式两行应同带并排（垂直居中对齐），"
+              f"center inline={_center_y(inline_sub):.1f} "
+              f"primary={_center_y(primary_row):.1f}")
+        return 1
+    if _ox(inline_sub) <= _ox(primary_row) + 40:
+        print(f"FAIL: 副行应在主行右侧，x inline={_ox(inline_sub):.1f} "
+              f"primary={_ox(primary_row):.1f}")
+        return 1
+    reserve_divider, _ = QQmlExpression(engine.rootContext(), sweep,
+                                        "secondaryReserve").evaluate()
+    print(f"dual-line: 分割线分割 —— 竖线可见，副行 (x={_ox(inline_sub):.1f}, "
+          f"y={_oy(inline_sub):.1f}) 与主行同带，reserve={reserve_divider}", flush=True)
+
+    # 切到上下双行
+    configs.set_pref("lyric_dual_line_layout", "stacked")
+    _wait(150)
+    if divider.property("visible") or inline_sub.property("visible"):
+        print(f"FAIL: 上下双行模式应收起竖线与右侧副行，"
+              f"divider={divider.property('visible')} inline={inline_sub.property('visible')}")
+        return 1
+    if not stacked_sub.property("visible"):
+        print("FAIL: 上下双行模式下副行必须显示在主行下方")
+        return 1
+    if _oy(stacked_sub) < _bottom(primary_row) - 1.0:
+        print(f"FAIL: 副行应在主行下方，sub.y={_oy(stacked_sub):.1f} "
+              f"main.bottom={_bottom(primary_row):.1f}")
+        return 1
+    if abs(_ox(stacked_sub) - _ox(primary_row)) > 1.5:
+        print(f"FAIL: 上下双行应与主行左对齐，x sub={_ox(stacked_sub):.1f} "
+              f"main={_ox(primary_row):.1f}")
+        return 1
+    # 副行字号必须明显小于主行：卡片高度是框架给的固定值（正常约 100），
+    # 副行沿用原尺寸会把整块顶出卡片下缘
+    sub_px = float(_eval(stacked_sub, "font.pixelSize"))
+    main_px = float(_eval(root, "titlePx"))
+    if not (sub_px < main_px * 0.75 and sub_px >= 10):
+        print(f"FAIL: 上下双行的副行字号应小于主行（约 0.6 倍），got {sub_px} vs {main_px}")
+        return 1
+    # 副行不再占横向额度
+    reserve_stacked, err_rs = QQmlExpression(engine.rootContext(), sweep,
+                                             "secondaryReserve").evaluate()
+    max_stacked, _ = QQmlExpression(engine.rootContext(), sweep,
+                                    "mainMaxWidth").evaluate()
+    if err_rs or reserve_stacked is None or abs(float(reserve_stacked)) > 0.5:
+        print(f"FAIL: 上下双行时副行不应再占主行横向额度，got {reserve_stacked}")
+        return 1
+    if abs(float(max_stacked) - 480) > 0.5:
+        print(f"FAIL: 上下双行时主行额度应回到 480，got {max_stacked}")
+        return 1
+    # 整块不能溢出组件卡片（副行是第二行，最容易踩）
+    root_h = float(root.property("height"))
+    if _bottom(stacked_sub) > root_h + 0.5:
+        print(f"FAIL: 上下双行的副行溢出了组件高度，bottom={_bottom(stacked_sub):.1f} "
+              f"root.height={root_h:.1f}")
+        return 1
+    print(f"dual-line: 上下双行 —— 副行在主行下方 (x={_ox(stacked_sub):.1f}, "
+          f"y={_oy(stacked_sub):.1f}, px={sub_px:.0f})，竖线收起，reserve=0，"
+          f"bottomsub={_bottom(stacked_sub):.1f}/{root_h:.0f}", flush=True)
+
+    # 切回分割线：右侧副行与竖线必须回来，下方副行收起
+    configs.set_pref("lyric_dual_line_layout", "divider")
+    _wait(150)
+    if not divider.property("visible") or not inline_sub.property("visible"):
+        print("FAIL: 切回分割线模式后竖线与右侧副行未恢复")
+        return 1
+    if stacked_sub.property("visible"):
+        print("FAIL: 切回分割线模式后下方副行未收起")
+        return 1
+    print("dual-line: 排布模式可双向切换（配置即时生效）", flush=True)
+    _settle_line()
 
     # 行级歌词：不应启用卡拉OK裁切层；fillRatio 恒为 1
     backend.set_line(
@@ -1002,9 +1128,6 @@ def main():
          {"text": "好", "startMs": 2600, "endMs": 3800, "ruby": ""}],
         True, "", japanese=False)
     _settle_line()
-
-    def _eval(obj, expression):
-        return QQmlExpression(engine.rootContext(), obj, expression).evaluate()[0]
 
     content_row = next((o for o in root.findChildren(QObject)
                         if o.property("objectName") == "contentRow"), None)

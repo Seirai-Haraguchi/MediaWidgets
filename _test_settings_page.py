@@ -93,6 +93,7 @@ class StubConfigs(QObject):
                         "lyric_gradient_background": True,
                         "lyric_gradient_intensity": 100,
                         "lyric_subtitle_content": "translation_or_next",
+                        "lyric_dual_line_layout": "divider",
                         "lyric_furigana_enabled": True,
                     }
                 }
@@ -351,6 +352,36 @@ def main():
         return 1
     print("furigana: switch card present, on by default, persists to config", flush=True)
 
+    # 双行排布选择卡：默认「分割线分割」（index 0），切到「上下双行」写回 stacked。
+    # 两个模式在组件里走的是不同排布（右侧竖线 / 下方第二行），所以值必须原样落库。
+    layout_card = find_object("lyricLayoutCard")
+    if layout_card is None:
+        print("FAIL: lyricLayoutCard missing", flush=True)
+        return 1
+    if layout_card.property("title") != "双行歌词排布":
+        print(f"FAIL: lyricLayoutCard title={layout_card.property('title')!r}", flush=True)
+        return 1
+    layout_combos = [c for c in layout_card.findChildren(QObject)
+                     if "ComboBox" in c.metaObject().className()]
+    if len(layout_combos) != 1:
+        print(f"FAIL: lyricLayoutCard should host exactly 1 ComboBox, "
+              f"got {len(layout_combos)}", flush=True)
+        return 1
+    layout_combo = layout_combos[0]
+    if layout_combo.property("count") != 2:
+        print(f"FAIL: 双行排布应有 2 个选项，got {layout_combo.property('count')}", flush=True)
+        return 1
+    if layout_combo.property("currentIndex") != 0:
+        print(f"FAIL: 双行排布默认应为「分割线分割」，"
+              f"got index={layout_combo.property('currentIndex')}", flush=True)
+        return 1
+    QMetaObject.invokeMethod(layout_combo, "activated",
+                             Qt.ConnectionType.DirectConnection, Q_ARG("int", 1))
+    if configs.written.get("lyric_dual_line_layout") != "stacked":
+        print(f"FAIL: 双行排布选择未持久化，written={configs.written}", flush=True)
+        return 1
+    print("dual-line: layout card present, defaults to divider, persists stacked", flush=True)
+
     # 换行与换歌动画开关卡：默认开、点击后写回配置（关掉后歌词组件回落轻量淡入）
     anim_card = find_object("lyricAnimationCard")
     if anim_card is None:
@@ -404,6 +435,7 @@ def main():
         "ic_fluent_local_language_20_regular",
         "ic_fluent_text_font_20_regular",
         "ic_fluent_slide_transition_20_regular",
+        "ic_fluent_layout_row_two_split_bottom_20_regular",
     ]
     index_js = (
         RINUI_QML_DIR / "RinUI" / "assets" / "fonts" / "FluentSystemIcons-Index.js"

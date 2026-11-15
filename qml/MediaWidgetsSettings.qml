@@ -490,6 +490,37 @@ FluentPage {
                 }
             }
 
+            // 双行排布：副行放在原文右侧（分割线分隔）还是原文下方（上下双行）
+            SettingCard {
+                objectName: "lyricLayoutCard"
+                Layout.fillWidth: true
+                icon.name: "ic_fluent_layout_row_two_split_bottom_20_regular"
+                title: qsTr("双行歌词排布")
+                description: qsTr("「分割线分割」把副行放在原文右侧、中间用竖线隔开；「上下双行」把副行放在原文下方。")
+
+                ComboBox {
+                    id: lyricLayoutCombo
+                    textRole: "label"
+                    model: ListModel {
+                        ListElement { label: qsTr("分割线分割"); value: "divider" }
+                        ListElement { label: qsTr("上下双行"); value: "stacked" }
+                    }
+
+                    property string currentLayout: root.config(
+                        "lyric_dual_line_layout", "divider")
+                    currentIndex: {
+                        for (var i = 0; i < lyricLayoutCombo.count; i++)
+                            if (lyricLayoutCombo.model.get(i).value === currentLayout)
+                                return i
+                        return 0
+                    }
+                    onActivated: (index) => {
+                        Configs.setPlugin(root.pluginId, "lyric_dual_line_layout",
+                                          lyricLayoutCombo.model.get(index).value)
+                    }
+                }
+            }
+
             // 振假名：仅 QQ 音乐（QRC）的日语歌词带平假名注音，其余歌词源无此数据
             SettingCard {
                 objectName: "lyricFuriganaCard"

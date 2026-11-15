@@ -65,6 +65,7 @@ samples = {
                ("MediaWidgetsSettings", "字重", "Weight"),
                ("LyricsWidget", "跟随全局字体", "Follow Global Font"),
                ("MediaWidget", "Playing", "Playing"),
+               ("MediaWidgetsSettings", "上下双行", "Stacked Lines"),
                ("LyricsWidget", "正在获取歌词…", "Fetching lyrics…")],
     "zh_TW": [("MediaWidgetsSettings", "正在播放", "正在播放"),
                ("MediaWidgetsSettings", "显示播放源图标", "顯示播放來源圖示"),
@@ -74,6 +75,7 @@ samples = {
                ("MediaWidgetsSettings", "日语歌词字体", "日語歌詞字型"),
                ("MediaWidgetsSettings", "日语歌词振假名", "日語歌詞振假名"),
                ("MediaWidget", "Media", "媒體"),
+               ("MediaWidgetsSettings", "上下双行", "上下雙行"),
                ("LyricsWidget", "歌词获取失败", "歌詞取得失敗")],
     "ja_JP": [("MediaWidgetsSettings", "正在播放", "再生中"),
                ("MediaWidgetsSettings", "显示播放源图标", "再生元アイコンを表示"),
@@ -82,14 +84,16 @@ samples = {
                ("MediaWidgetsSettings", "罗马音歌词字体", "ローマ字歌詞のフォント"),
                ("MediaWidgetsSettings", "日语歌词字体", "日本語歌詞のフォント"),
                ("MediaWidgetsSettings", "日语歌词振假名", "日本語歌詞の振り仮名"),
-               ("MediaWidget", "Media", "メディア")],
+               ("MediaWidget", "Media", "メディア"),
+               ("MediaWidgetsSettings", "双行歌词排布", "2行歌詞のレイアウト")],
     "zh_CN": [("MediaWidgetsSettings", "正在播放", "正在播放"),
                ("MediaWidgetsSettings", "歌词组件", "歌词组件"),
                ("MediaWidgetsSettings", "原文歌词字体", "原文歌词字体"),
                ("MediaWidgetsSettings", "日语歌词字体", "日语歌词字体"),
                ("MediaWidgetsSettings", "日语歌词振假名", "日语歌词振假名"),
                ("MediaWidget", "Media", "媒体"),
-              ("MediaWidget", "Playing", "播放中")],
+              ("MediaWidget", "Playing", "播放中"),
+              ("MediaWidgetsSettings", "分割线分割", "分割线分割")],
 }
 
 for catalog, items in samples.items():
@@ -97,7 +101,7 @@ for catalog, items in samples.items():
         got = translated(catalog, context, source)
         check(f"{catalog}: {source!r}", got == expect, f"got {got!r}")
 
-# 每份目录 58 条，且 .ts 里没有遗留的 unfinished（lrelease 时无遗漏）
+# 每份目录 62 条，且 .ts 里没有遗留的 unfinished（lrelease 时无遗漏）
 for catalog in ("en_US", "zh_CN", "zh_TW", "ja_JP"):
     qm = I18N / f"MediaWidgets_{catalog}.qm"
     check(f"{catalog}.qm exists", qm.exists())
@@ -105,7 +109,7 @@ for catalog in ("en_US", "zh_CN", "zh_TW", "ja_JP"):
     unfinished = ts_text.count('type="unfinished"')
     check(f"{catalog}.ts fully translated", unfinished == 0,
           f"{unfinished} unfinished")
-    check(f"{catalog}.ts has 58 messages", ts_text.count("<source>") == 58,
+    check(f"{catalog}.ts has 62 messages", ts_text.count("<source>") == 62,
           f"{ts_text.count('<source>')} messages")
 
 print()

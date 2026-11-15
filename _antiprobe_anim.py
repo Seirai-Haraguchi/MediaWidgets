@@ -54,6 +54,13 @@ MUTATIONS = [
         "        return x\n",
         "换歌应为非线性强调减速曲线",
     ),
+    (
+        "上下双行只存配置、副行仍留在右侧（第二个副行永不显示）",
+        '            visible: root.stackedDualLine && !miniMode && sweepRow.visible '
+        '&& text !== ""\n',
+        "            visible: false\n",
+        "上下双行模式下副行必须显示在主行下方",
+    ),
 ]
 
 
