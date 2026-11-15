@@ -680,9 +680,10 @@ def main():
     inline_sub = _find("subtitleLabel")
     stacked_sub = _find("stackedSubtitleLabel")
     primary_row = _find("primaryRow")
-    if None in (divider, inline_sub, stacked_sub, primary_row):
+    content_row_box = _find("contentRow")
+    if None in (divider, inline_sub, stacked_sub, primary_row, content_row_box):
         print(f"FAIL: 双行排布缺少部件 divider={divider} inline={inline_sub} "
-              f"stacked={stacked_sub} primary={primary_row}")
+              f"stacked={stacked_sub} primary={primary_row} row={content_row_box}")
         return 1
 
     def _ox(item):
@@ -720,6 +721,7 @@ def main():
         return 1
     reserve_divider, _ = QQmlExpression(engine.rootContext(), sweep,
                                         "secondaryReserve").evaluate()
+    divider_main_y = _oy(content_row_box)
     print(f"dual-line: 分割线分割 —— 竖线可见，副行 (x={_ox(inline_sub):.1f}, "
           f"y={_oy(inline_sub):.1f}) 与主行同带，reserve={reserve_divider}", flush=True)
 
@@ -733,9 +735,19 @@ def main():
     if not stacked_sub.property("visible"):
         print("FAIL: 上下双行模式下副行必须显示在主行下方")
         return 1
-    if _oy(stacked_sub) < _bottom(primary_row) - 1.0:
-        print(f"FAIL: 副行应在主行下方，sub.y={_oy(stacked_sub):.1f} "
-              f"main.bottom={_bottom(primary_row):.1f}")
+    # 主行必须真的上抬让位（副行贴底，主行不动就会压在一起）。
+    # 判据用 contentRow 的 y（它与贴底副行同在 contentArea 坐标系；primaryRow 的 y
+    # 是相对 contentRow 的，恒为 0，看不出上抬）。去掉 verticalCenterOffset 立刻 FAIL。
+    if _oy(content_row_box) > divider_main_y - 1.0:
+        print(f"FAIL: 上下双行时主行应上抬给贴底副行让位，"
+              f"y={_oy(content_row_box):.1f}（分割线模式下 {divider_main_y:.1f}）")
+        return 1
+    # 两行不许叠在一起。主行的实际底边 = contentRow.y + primaryRow.y + 行高
+    main_bottom = (_oy(content_row_box) + _oy(primary_row)
+                   + float(primary_row.property("height")))
+    if _oy(stacked_sub) < main_bottom + 0.5:
+        print(f"FAIL: 上下双行时副行与主行重叠了，sub.y={_oy(stacked_sub):.1f} "
+              f"main.bottom={main_bottom:.1f}")
         return 1
     if abs(_ox(stacked_sub) - _ox(primary_row)) > 1.5:
         print(f"FAIL: 上下双行应与主行左对齐，x sub={_ox(stacked_sub):.1f} "

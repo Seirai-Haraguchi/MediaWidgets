@@ -56,10 +56,16 @@ MUTATIONS = [
     ),
     (
         "上下双行只存配置、副行仍留在右侧（第二个副行永不显示）",
-        '            visible: root.stackedDualLine && !miniMode && sweepRow.visible '
+        '        visible: root.stackedDualLine && !miniMode && sweepRow.visible '
         '&& text !== ""\n',
-        "            visible: false\n",
+        "        visible: false\n",
         "上下双行模式下副行必须显示在主行下方",
+    ),
+    (
+        "去掉主行的上抬让位（贴底副行直接压在主行上）",
+        "            return -Math.min(need, slack)\n",
+        "            return 0\n",
+        "上下双行时主行应上抬给贴底副行让位",
     ),
 ]
 

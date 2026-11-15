@@ -790,19 +790,28 @@ Widget {
     // 注意：contentRow 有 anchors.left，锚点会**覆盖 x 属性**，写 x 做位移动画无效。
     // 换歌横扫必须走 transform（锚点管不到 transform），与逐词入场的位移同一处理。
     //
-    // 外层是 ColumnLayout 而不是 RowLayout：双行排布有两种（见 stackedDualLine）——
+    // 外层是 ColumnLayout：双行排布有两种（见 stackedDualLine）——
     //   divider：主行与副行并排（内层 primaryRow，主行右侧 2px 分割线 + 副行）
-    //   stacked：主行在上、副行在下（副行挂到 ColumnLayout 的第二行）
+    //   stacked：副行**不进这条内容行**，而是贴到组件下缘单独成一行的叠加层
+    //           （见下面的 stackedSubLabel），主行因此始终独占宽度与行高。
     // 两种排布下的主行/间奏点/状态文案共用同一份 primaryRow，不复制 WordSweep。
     ColumnLayout {
         id: contentRow
         objectName: "contentRow"
         anchors.left: parent.left
         anchors.verticalCenter: parent.verticalCenter
-        // 上下双行时两行之间留 3px：组件卡片高度由框架给定（正常 100 / mini 56），
-        // 多出来的一行已经占去约 17px，行距再放宽就会顶出卡片。
-        spacing: root.stackedDualLine ? 3 : 0
         visible: root.shouldShow
+
+        // 上下双行时主行整体上抬半行，给贴底的副行让位（合起来看才是居中的两行块）。
+        // 上抬量按内容区余量钳位：空间紧就只抬到主行仍留在内容区里为止，
+        // 绝不把主行推出上缘（卡片高度是框架给的，不同主题下并不一致）。
+        anchors.verticalCenterOffset: {
+            if (!stackedSubLabel.visible)
+                return 0
+            var need = (stackedSubLabel.height + 3) / 2
+            var slack = Math.max(0, (parent.height - primaryRow.height) / 2)
+            return -Math.min(need, slack)
+        }
 
         // 换歌横扫（横向，Material 强调曲线）× 换行抬升（纵向）× 淡入淡出，
         // 静息时位移为 0、不透明度为 1，对常规布局零影响。
@@ -923,26 +932,38 @@ Widget {
                              ? root.translationFontWeight : root.originalFontWeight
             }
         }
+    }
 
-        // 副行（上下双行排布）：挂在主行下方、与主行左对齐。
-        // 字号取主行字号的 0.6 倍——卡片高度是框架给的固定值，副行若沿用原尺寸
-        // （约 0.75 倍主行）会把整块顶出卡片下缘。
-        // 宽度上限跟主行走（不低于 200）：两行读起来是一个块，副行比主行还宽会很怪；
-        // 超宽仍由 MarqueeTitle 自己跑马灯滚动。
-        MarqueeTitle {
-            id: stackedSubLabel
-            objectName: "stackedSubtitleLabel"
-            visible: root.stackedDualLine && !miniMode && sweepRow.visible && text !== ""
-            text: root.shownSubLine
-            maximumWidth: Math.max(200, sweepRow.width)
-            speed: 80
-            opacity: root.shownSubIsTranslation ? 0.62 : 0.38
-            font.family: root.shownSubIsTranslation
-                         ? root.translationFontFamily : root.originalFontFamily
-            font.weight: root.shownSubIsTranslation
-                         ? root.translationFontWeight : root.originalFontWeight
-            font.pixelSize: Math.max(10, Math.round(root.titlePx * 0.6))
-        }
+    // 副行（上下双行排布）：**不在 contentRow 里**，而是贴到内容区下缘单独占一行。
+    // 为什么不放进内容行：卡片高度是框架给的固定值（正常约 100 / mini 56），
+    // 内容区往往只剩主行那么高，多出来的一行塞进布局会被顶出边界（实测在宿主里
+    // 直接看不见）。改成像媒体组件的背景时间水印那样贴底摆放，就只借用卡片下缘
+    // 那点留白，不参与主行的布局分配。
+    // 主行一侧用 anchors.verticalCenterOffset 上抬半行让位（见 contentRow），
+    // 两行合起来仍是视觉居中的一块。
+    //
+    // 与主行同一个坐标系（contentArea），所以左对齐就是 anchors.left: parent.left。
+    // 宽度上限跟主行走（不低于 200）：两行读起来是一个块，副行比主行还宽会很怪；
+    // 超宽仍由 MarqueeTitle 自己跑马灯滚动。
+    MarqueeTitle {
+        id: stackedSubLabel
+        objectName: "stackedSubtitleLabel"
+        visible: root.stackedDualLine && !miniMode && sweepRow.visible && text !== ""
+        anchors.left: parent.left
+        anchors.bottom: parent.bottom
+        text: root.shownSubLine
+        maximumWidth: Math.max(200, sweepRow.width)
+        speed: 80
+        // 换行 / 换歌时与主行一起淡出淡入（它已经不在 contentRow 里，
+        // 拿不到那份 opacity，需要自己接上）；不做纵向位移，避免贴底时被裁掉。
+        opacity: (root.shownSubIsTranslation ? 0.62 : 0.38) * root.lyricOpacity
+        transform: Translate { x: root.lyricSlideX }
+        font.family: root.shownSubIsTranslation
+                     ? root.translationFontFamily : root.originalFontFamily
+        font.weight: root.shownSubIsTranslation
+                     ? root.translationFontWeight : root.originalFontWeight
+        // 比主行小一号（0.55 倍）：贴底这一行不能压到主行的下部字形
+        font.pixelSize: Math.max(10, Math.round(root.titlePx * 0.55))
     }
 
     // 逐字卡拉OK行：底层未唱文字 + 顶层已唱文字按词宽裁切，随 positionMs 填充；
